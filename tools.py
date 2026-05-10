@@ -823,6 +823,25 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
         if not sanitized:
             raise _tool_error("All provided usernames are empty or invalid.", "validation_error", "Provide at least one valid username.")
 
+        if params.since_date and params.until_date:
+            from datetime import datetime as _datetime
+            try:
+                _since_dt = _datetime.strptime(params.since_date.strip(), "%d.%m.%Y")
+                _until_dt = _datetime.strptime(params.until_date.strip(), "%d.%m.%Y")
+            except ValueError as e:
+                raise _tool_error(
+                    f"Invalid date format: {e}. Use DD.MM.YYYY (e.g. 01.03.2026).",
+                    "validation_error",
+                    "Correct the date format and try again.",
+                )
+            if _since_dt > _until_dt:
+                raise _tool_error(
+                    f"since_date ({params.since_date}) is after until_date ({params.until_date}). "
+                    "The start date must be earlier than or equal to the end date.",
+                    "validation_error",
+                    "Swap since_date and until_date so the range goes from earlier to later.",
+                )
+
         await ctx.info(f"instagram_batch_scrape: {len(sanitized)} profiles, {params.max_workers} workers")
         _t0 = time.perf_counter()
 

@@ -68,6 +68,7 @@ class BatchConfig:
     progress_file: str = ""          # auto-derived if empty
     max_workers: int = 20
     max_retries: int = 5
+    retry_base_delay: float = 0.5    # base seconds for exponential retry back-off
     since_timestamp: Optional[int] = None
     until_timestamp: Optional[int] = None
     since_date: str = ""             # "DD.MM.YYYY" convenience — converts to since_timestamp
@@ -196,6 +197,9 @@ class BatchRunner:
             try:
                 result = await coro
             except asyncio.CancelledError:
+                continue
+            except Exception as exc:
+                logger.error("Unexpected error from scrape task: %s", exc)
                 continue
             username = result.get("username", "")
             status = result.get("status", "error")
@@ -385,7 +389,7 @@ class BatchRunner:
                     last_exc = exc
                     if attempt >= cfg.max_retries:
                         break
-                    await asyncio.sleep(0.5 * attempt)
+                    await asyncio.sleep(cfg.retry_base_delay * attempt)
 
             if last_exc is not None:
                 logger.debug("@%s failed after %d retries: %s", username, cfg.max_retries, last_exc)

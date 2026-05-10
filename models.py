@@ -13,6 +13,7 @@ Diagnostics:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -32,7 +33,20 @@ def _parse_user_date(s: str) -> Optional[int]:
     if not s:
         return None
     s = s.replace(",", ".")
-    for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+    # Detect format by structure to minimize strptime attempts
+    if len(s) == 10 and s[4] == '-':
+        fmts = ["%Y-%m-%d"]
+    elif len(s) == 10 and s[2] in ('.', '/', '-'):
+        sep = s[2]
+        if sep == '.':
+            fmts = ["%d.%m.%Y"]
+        elif sep == '/':
+            fmts = ["%d/%m/%Y"]
+        else:
+            fmts = ["%d-%m-%Y"]
+    else:
+        fmts = ["%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"]
+    for fmt in fmts:
         try:
             return int(datetime.strptime(s, fmt).timestamp())
         except ValueError:
@@ -820,12 +834,11 @@ class PostInput(BaseModel):
     def extract_shortcode(cls, v: str) -> str:
         v = v.strip()
         # Full URL: extract shortcode from /p/{code}/
-        import re as _re
-        m = _re.search(r'/p/([A-Za-z0-9_\-]+)', v)
+        m = re.search(r'/p/([A-Za-z0-9_\-]+)', v)
         if m:
             return m.group(1)
         # Bare shortcode: must be alphanumeric + - _
-        if _re.match(r'^[A-Za-z0-9_\-]{5,15}$', v):
+        if re.match(r'^[A-Za-z0-9_\-]{5,15}$', v):
             return v
         raise ValueError(f"Cannot extract a valid shortcode from: {v!r}")
 
@@ -858,12 +871,11 @@ class PostCommentsInput(BaseModel):
     @field_validator("post")
     @classmethod
     def extract_comments_shortcode(cls, v: str) -> str:
-        import re as _re
         v = v.strip()
-        m = _re.search(r'/(?:p|reel|tv)/([A-Za-z0-9_\-]+)', v)
+        m = re.search(r'/(?:p|reel|tv)/([A-Za-z0-9_\-]+)', v)
         if m:
             return m.group(1)
-        if _re.match(r'^[A-Za-z0-9_\-]{5,15}$', v):
+        if re.match(r'^[A-Za-z0-9_\-]{5,15}$', v):
             return v
         raise ValueError(f"Cannot extract a valid shortcode from: {v!r}")
 

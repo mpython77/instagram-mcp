@@ -156,7 +156,7 @@ class AdaptiveRateLimiter:
             # (50 successes in a row → bump max_rate back toward absolute ceiling)
             if (
                 self._consecutive_successes > 0
-                and self._consecutive_successes % 50 == 0
+                and self._consecutive_successes % 20 == 0
                 and self._max_rate < self._max_rate_ceiling
             ):
                 self._max_rate = min(self._max_rate_ceiling, self._max_rate * 1.5)
@@ -166,7 +166,7 @@ class AdaptiveRateLimiter:
                 )
 
             self._rate = min(self._max_rate, self._rate * self._recovery_factor)
-            if self._in_backoff and self._rate >= self._max_rate * 0.9:
+            if self._in_backoff and self._rate >= self._base_rate * 0.9:
                 self._in_backoff = False
                 self._backoff_count = 0
 
@@ -194,7 +194,7 @@ class AdaptiveRateLimiter:
             "min_rps": self._min_rate,
             "max_rps": round(self._max_rate, 2),
             "burst": self._burst,
-            "tokens_available": round(self._tokens, 1),
+            "tokens_available": round(self._tokens, 1),  # approximate — no lock
             "in_backoff": self._in_backoff,
             "backoff_count": self._backoff_count,
             "consecutive_429s": self._consecutive_429s,

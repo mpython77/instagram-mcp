@@ -41,6 +41,15 @@ def _validate_proxy_url(url: str) -> None:
         raise ValueError(
             f"Invalid proxy URL {url!r}: must contain a host after the scheme"
         )
+    # Port validation
+    if ":" in rest.split("/")[0]:
+        port_str = rest.split("/")[0].split(":")[-1]
+        if port_str.isdigit():
+            port = int(port_str)
+            if not (1 <= port <= 65535):
+                raise ValueError(
+                    f"Invalid proxy URL {url!r}: port {port} must be in range 1-65535"
+                )
 
 
 def _mask_proxy_url(url: str) -> str:
@@ -79,7 +88,7 @@ class _ProxyState:
         """Higher is better. Used by `get_best_proxy`."""
         if self.total_requests == 0:
             return 1.0  # untried proxy gets a fair shot
-        return (self.success_rate * 100) / (self.avg_latency + 1.0)
+        return max(0.01, (self.success_rate * 100) / (self.avg_latency + 1.0))
 
 
 class ProxyManager:
@@ -151,7 +160,7 @@ class ProxyManager:
     def start_health_checks(self) -> None:
         """Start the background health check task (idempotent)."""
         if self._health_task is None or self._health_task.done():
-            self._health_task = asyncio.ensure_future(self._health_check_loop())
+            self._health_task = asyncio.create_task(self._health_check_loop())
             logger.info(
                 "Proxy health check loop started (interval=%ds)",
                 self._health_check_interval,

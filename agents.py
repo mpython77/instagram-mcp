@@ -567,7 +567,8 @@ class CreatorDiscoveryAgent(_BaseAgent):
         await self._emit(progress_cb, 1, 3, f"Scanning @{seed_username} tag network...")
         try:
             user = await self._fetch(seed_username)
-        except Exception:
+        except Exception as e:
+            logger.warning("CreatorDiscoveryAgent: fetch failed for seed @%s: %s", seed_username, e)
             return []
 
         if user is None:
@@ -614,6 +615,16 @@ class CreatorDiscoveryAgent(_BaseAgent):
         if not candidates:
             return []
 
+        # Cap candidates to avoid fetching an unbounded number of profiles.
+        # Keep the highest-frequency entries; max_results * 10 is a generous ceiling.
+        _MAX_CANDIDATES = max_results * 10
+        if len(candidates) > _MAX_CANDIDATES:
+            candidates = dict(
+                sorted(candidates.items(), key=lambda kv: kv[1]["freq"], reverse=True)[
+                    :_MAX_CANDIDATES
+                ]
+            )
+
         # ── Step 2: Parallel profile fetch ───────────────────────────────────
         await self._emit(progress_cb, 2, 3, f"Fetching {len(candidates)} discovered accounts...")
         semaphore = asyncio.Semaphore(10)
@@ -623,7 +634,8 @@ class CreatorDiscoveryAgent(_BaseAgent):
                 try:
                     u = await self.client.fetch_user(uname, self.config.cache_profile_ttl)
                     return uname, u
-                except Exception:
+                except Exception as e:
+                    logger.debug("CreatorDiscoveryAgent: fetch failed for @%s: %s", uname, e)
                     return uname, None
 
         tasks = [asyncio.create_task(_fetch_one(u)) for u in candidates]
@@ -831,7 +843,11 @@ class ContentAuditAgent(_BaseAgent):
         report = ContentAuditReport(username=username)
 
         await self._emit(progress_cb, 0, 3, f"Fetching @{username} profile…")
-        user = await self._fetch(username)
+        try:
+            user = await self._fetch(username)
+        except Exception as e:
+            logger.warning("ContentAuditAgent: fetch failed for @%s: %s", username, e)
+            return report
         if user is None:
             return report
 

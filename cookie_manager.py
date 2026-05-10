@@ -61,6 +61,7 @@ class CookieManager:
         self._fb_dtsg: Optional[str] = None
         self._lsd: Optional[str] = None
         self._csrf_fetched_at: float = 0.0
+        self._csrf_cache: Optional[Tuple[str, str]] = None  # (fb_dtsg, lsd)
         self._loaded: bool = False
 
         # asyncio lock — prevents concurrent CSRF refreshes
@@ -154,22 +155,28 @@ class CookieManager:
         *session* is a curl_cffi.requests.AsyncSession with cookies already set.
         """
         async with self._csrf_lock:
+            # Fast path: return cached tokens if they are still valid.
+            if self._csrf_cache:
+                return self._csrf_cache
+
             age = time.monotonic() - self._csrf_fetched_at
             if self._fb_dtsg and self._lsd and age < _CSRF_CACHE_TTL:
-                return self._fb_dtsg, self._lsd
+                self._csrf_cache = (self._fb_dtsg, self._lsd)
+                return self._csrf_cache
 
             fb_dtsg, lsd = await _fetch_csrf_tokens(session, self._cookies)
             if fb_dtsg and lsd:
                 self._fb_dtsg = fb_dtsg
                 self._lsd = lsd
                 self._csrf_fetched_at = time.monotonic()
+                self._csrf_cache = (fb_dtsg, lsd)
                 logger.debug("CSRF tokens refreshed (fb_dtsg=%s…)", fb_dtsg[:12])
             else:
                 raise RuntimeError(
                     "Could not extract fb_dtsg/lsd from instagram.com — "
                     "session may be expired. Please re-export cookies.txt."
                 )
-        return self._fb_dtsg, self._lsd  # type: ignore[return-value]
+        return self._csrf_cache  # type: ignore[return-value]
 
     # ── Path resolution ──────────────────────────────────────────────────────
 
@@ -223,17 +230,21 @@ def _parse_json_cookies(raw: str) -> Dict[str, str]:
 
     result: Dict[str, str] = {}
     for entry in data:
-        if not isinstance(entry, dict):
+        try:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name", "").strip()
+            value = entry.get("value", "")
+            domain = entry.get("domain", "")
+            # Only include instagram.com cookies
+            if not name:
+                continue
+            if domain and "instagram.com" not in domain:
+                continue
+            result[name] = str(value)
+        except Exception as e:
+            logger.warning("Skipping malformed cookie entry: %s", e)
             continue
-        name = entry.get("name", "").strip()
-        value = entry.get("value", "")
-        domain = entry.get("domain", "")
-        # Only include instagram.com cookies
-        if not name:
-            continue
-        if domain and "instagram.com" not in domain:
-            continue
-        result[name] = str(value)
 
     return result
 
@@ -247,16 +258,20 @@ def _parse_netscape_cookies(raw: str) -> Dict[str, str]:
     """
     result: Dict[str, str] = {}
     for line in raw.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
+        try:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 7:
+                continue
+            name = parts[5].strip()
+            value = parts[6].strip()
+            if name:
+                result[name] = value
+        except Exception as e:
+            logger.warning("Skipping malformed cookie line: %s", e)
             continue
-        parts = line.split("\t")
-        if len(parts) < 7:
-            continue
-        name = parts[5].strip()
-        value = parts[6].strip()
-        if name:
-            result[name] = value
     return result
 
 

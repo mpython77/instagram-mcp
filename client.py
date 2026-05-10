@@ -23,6 +23,8 @@ import time
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse, urlunparse
 
+import json as _json
+
 from .cache import SmartCache
 from .config import MCPConfig
 from .cookie_manager import CookieManager
@@ -129,6 +131,16 @@ class InstagramClient:
                 proxies=proxies,
                 timeout=self._config.request_timeout,
             )
+            # Evict oldest session if pool exceeds limit
+            MAX_POOL_SIZE = 50
+            if len(self._session_pool) >= MAX_POOL_SIZE:
+                oldest_key = next(iter(self._session_pool))
+                old_session = self._session_pool.pop(oldest_key)
+                try:
+                    await old_session.close()
+                except Exception:
+                    pass
+                logger.debug("Session pool evicted: %s (pool full)", oldest_key)
             self._session_pool[pool_key] = session
             logger.debug("New AsyncSession created for: %s", _mask_proxy(proxy_url))
             return session
@@ -358,8 +370,6 @@ class InstagramClient:
         proxy_url: Optional[str],
     ) -> Dict[str, Any]:
         """Single GraphQL feed page request."""
-        import json as _json
-
         variables = _json.dumps({
             "data": {"count": first},
             "username": username,
@@ -460,7 +470,7 @@ class InstagramClient:
         now = time.time()
         ttl = cache_ttl or self._config.cache_feed_ttl
 
-        STOP_THRESHOLD = 100  # consecutive too-old posts when date_range is set
+        STOP_THRESHOLD = 5  # consecutive too-old posts when date_range is set
         consecutive_old = 0
         stop_early = False
 
@@ -598,8 +608,6 @@ class InstagramClient:
         ttl = cache_ttl or self._config.cache_tagged_ttl
 
         async def _do_fetch() -> Dict[str, Any]:
-            import json as _json
-
             session = await self._get_auth_session()
             fb_dtsg, lsd = await self._cookie_manager.ensure_csrf_tokens(session)  # type: ignore[union-attr]
 
@@ -760,8 +768,6 @@ class InstagramClient:
         ttl = cache_ttl or self._config.cache_reposts_ttl
 
         async def _do_fetch() -> Dict[str, Any]:
-            import json as _json
-
             session = await self._get_auth_session()
             fb_dtsg, lsd = await self._cookie_manager.ensure_csrf_tokens(session)  # type: ignore[union-attr]
 
@@ -921,8 +927,6 @@ class InstagramClient:
         ttl = cache_ttl or self._config.cache_reels_ttl
 
         async def _do_fetch() -> Dict[str, Any]:
-            import json as _json
-
             session = await self._get_auth_session()
             fb_dtsg, lsd = await self._cookie_manager.ensure_csrf_tokens(session)  # type: ignore[union-attr]
 
@@ -1121,6 +1125,49 @@ class InstagramClient:
 
     # ── Comments ─────────────────────────────────────────────────────────────
 
+    async def _fetch_comments_attempt(
+        self, media_id: str, params: Dict[str, str], proxy_url: Optional[str]
+    ) -> Dict[str, Any]:
+        url = f"https://www.instagram.com/api/v1/media/{media_id}/comments/"
+        session = await self._get_session(proxy_url)
+        resp = await session.get(
+            url,
+            params=params,
+            headers={
+                "User-Agent": self._config.ig_user_agent,
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://www.instagram.com/",
+                "X-IG-App-ID": "936619743392459",
+            },
+        )
+        status = resp.status_code
+        if status == 404:
+            from .exceptions import UserNotFoundError
+            raise UserNotFoundError(message=f"Post {media_id} not found (404).")
+        if status == 403:
+            from .exceptions import PrivateAccountError
+            raise PrivateAccountError(message=f"Post {media_id} is private or access denied (403).")
+        if status == 429:
+            return {"ok": False, "status_code": 429}
+        if status != 200:
+            return {"ok": False, "status_code": status}
+        try:
+            body = resp.json()
+        except (ValueError, TypeError):
+            return {"ok": False, "status_code": status}
+        if body.get("status") not in ("ok", None):
+            return {"ok": False, "status_code": status}
+        return {
+            "ok": True,
+            "status_code": 200,
+            "comments": body.get("comments") or [],
+            "caption": body.get("caption"),
+            "comment_count": int(body.get("comment_count") or 0),
+            "next_min_id": body.get("next_min_id") or "",
+            "has_more": bool(body.get("has_more_headload_comments")),
+        }
+
     async def fetch_comments(
         self,
         media_id: str,
@@ -1158,62 +1205,24 @@ class InstagramClient:
         ttl = cache_ttl or self._config.cache_comments_ttl
 
         async def _do_fetch() -> Dict[str, Any]:
+            await self._rate_limiter.acquire()
             params: Dict[str, str] = {
                 "can_support_threading": "true",
                 "sort_order": sort_order,
             }
             if min_id:
                 params["min_id"] = min_id
-
-            url = f"https://www.instagram.com/api/v1/media/{media_id}/comments/"
-            await self._rate_limiter.acquire()
-            session = await self._get_session(proxy_url=None)
-
-            resp = await session.get(
-                url,
-                params=params,
-                headers={
-                    "User-Agent": self._config.ig_user_agent,
-                    "Accept": "application/json, text/plain, */*",
-                    "Accept-Language": "en-US,en;q=0.9",
-                    "Referer": "https://www.instagram.com/",
-                    "X-IG-App-ID": "936619743392459",
-                },
+            result = await self._with_proxy_retry(
+                op_name=f"fetch_comments({media_id})",
+                single_attempt=lambda p: self._fetch_comments_attempt(media_id, params, p),
             )
-
-            status = resp.status_code
-            if status == 404:
-                raise FetchError(f"Comments: post {media_id} not found (404).")
-            if status == 403:
-                raise FetchError(f"Comments: post {media_id} is private or access denied (403).")
-            if status == 429:
-                raise FetchError("Comments: rate limited (429). Wait a moment and retry.")
-            if status != 200:
-                raise FetchError(f"Comments: unexpected HTTP {status}")
-
-            try:
-                body = resp.json()
-            except (ValueError, TypeError):
-                raise FetchError("Comments: non-JSON response")
-
-            if body.get("status") not in ("ok", None):
-                raise FetchError(f"Comments API error: status={body.get('status')!r}")
-
             logger.debug(
-                "Comments media=%s: %d comments, has_more=%s cursor=%s...",
+                "Comments media=%s: %d comments, has_more=%s",
                 media_id,
-                len(body.get("comments") or []),
-                body.get("has_more_headload_comments"),
-                str(body.get("next_min_id") or "")[:30],
+                len(result.get("comments") or []),
+                result.get("has_more"),
             )
-            return {
-                "comments": body.get("comments") or [],
-                "caption": body.get("caption"),
-                "comment_count": int(body.get("comment_count") or 0),
-                "next_min_id": body.get("next_min_id") or "",
-                "has_more": bool(body.get("has_more_headload_comments")),
-                "pages_fetched": 1,
-            }
+            return result
 
         return await self._cache.get_or_fetch(cache_key, _do_fetch, ttl=ttl)
 

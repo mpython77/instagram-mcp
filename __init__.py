@@ -43,6 +43,16 @@ def create_mcp_server():
     Returns:
         FastMCP: Ready-to-run MCP server instance
     """
+    try:
+        import curl_cffi  # noqa: F401
+    except ImportError:
+        raise RuntimeError(
+            "curl_cffi is not installed. "
+            "Install it with: pip install curl_cffi\n"
+            "instagram_mcp requires curl_cffi for TLS fingerprint spoofing; "
+            "without it the server cannot make requests to Instagram."
+        )
+
     from mcp.server.fastmcp import FastMCP
 
     from .cache import SmartCache
@@ -58,7 +68,10 @@ def create_mcp_server():
 
     # ── 2. Components ─────────────────────────────────────────────────────────
     cookie_manager = CookieManager(cookies_path=config.cookies_path or None)
-    cookie_manager.load()
+    try:
+        cookie_manager.load()
+    except Exception as e:
+        logger.warning("Cookie load failed: %s", e)
     if cookie_manager.is_authenticated:
         logger.info("instagram_mcp: authenticated session loaded from cookies.txt")
     else:

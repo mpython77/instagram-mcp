@@ -41,6 +41,26 @@ class UserNotFoundError(InstagramMCPError):
         super().__init__(message, **kwargs)
 
 
+class PostNotFoundError(InstagramMCPError):
+    """Post shortcode not found (404) or deleted."""
+
+    error_type = "post_not_found"
+    suggested_action = (
+        "Verify the post shortcode or URL is correct. "
+        "The post may have been deleted or the account may be private."
+    )
+
+    def __init__(self, shortcode: str = "", message: str = "", **kwargs):
+        self.shortcode = shortcode
+        if not message:
+            s = f" '{shortcode}'" if shortcode else ""
+            message = (
+                f"Post{s} not found. "
+                "It may have been deleted or the account is private."
+            )
+        super().__init__(message, **kwargs)
+
+
 class RateLimitError(InstagramMCPError):
     """Instagram rate limit (429) — after all retries are exhausted."""
 

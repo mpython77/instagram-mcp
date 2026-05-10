@@ -981,8 +981,24 @@ def parse_post_html(html: str, shortcode: str) -> PostInfo:
         post_url=f"https://www.instagram.com/p/{shortcode}/",
     )
 
+    # Extract the script tag containing post metadata — search only ~10KB instead of 1MB
+    import re as _re_local
+    _script_block = _re_local.search(
+        r'<script[^>]*type="application/json"[^>]*>(.*?)</script>',
+        html,
+        _re_local.DOTALL,
+    )
+    if not _script_block:
+        # Fallback: find any script block containing 'taken_at'
+        _script_block = _re_local.search(
+            r'<script[^>]*>((?:[^<]|<(?!/script))*taken_at(?:[^<]|<(?!/script))*)</script>',
+            html,
+            _re_local.DOTALL,
+        )
+    _search_html = _script_block.group(1) if _script_block else html
+
     # ── Location ──────────────────────────────────────────────────────────────
-    m = _POST_LOCATION_RE.search(html)
+    m = _POST_LOCATION_RE.search(_search_html)
     if m:
         try:
             import json as _json
@@ -1000,7 +1016,7 @@ def parse_post_html(html: str, shortcode: str) -> PostInfo:
             pass
 
     # ── Timestamp ─────────────────────────────────────────────────────────────
-    m = _POST_TAKEN_AT_RE.search(html)
+    m = _POST_TAKEN_AT_RE.search(_search_html)
     if m:
         ts = int(m.group(1))
         if _IG_TS_MIN <= ts <= _IG_TS_MAX:
@@ -1010,49 +1026,49 @@ def parse_post_html(html: str, shortcode: str) -> PostInfo:
             )
 
     # ── Author ────────────────────────────────────────────────────────────────
-    m = _POST_USERNAME_RE.search(html)
+    m = _POST_USERNAME_RE.search(_search_html)
     if m:
         info.username = m.group(1)
 
-    m = _POST_FULLNAME_RE.search(html)
+    m = _POST_FULLNAME_RE.search(_search_html)
     if m:
         info.full_name = m.group(1)
 
-    m = _POST_USER_ID_RE.search(html)
+    m = _POST_USER_ID_RE.search(_search_html)
     if m:
         info.user_id = m.group(1)
 
-    m = _POST_VERIFIED_RE.search(html)
+    m = _POST_VERIFIED_RE.search(_search_html)
     if m:
         info.is_verified = m.group(1) == "true"
 
     # ── Engagement ────────────────────────────────────────────────────────────
-    m = _POST_LIKES_RE.search(html)
+    m = _POST_LIKES_RE.search(_search_html)
     if m:
         info.likes = int(m.group(1))
 
-    m = _POST_COMMENTS_RE.search(html)
+    m = _POST_COMMENTS_RE.search(_search_html)
     if m:
         info.comments = int(m.group(1))
 
-    m = _POST_VIEWS_RE.search(html)
+    m = _POST_VIEWS_RE.search(_search_html)
     if m:
         info.view_count = int(m.group(1))
 
-    m = _POST_PLAYS_RE.search(html)
+    m = _POST_PLAYS_RE.search(_search_html)
     if m:
         info.play_count = int(m.group(1))
 
     # ── Media type ────────────────────────────────────────────────────────────
-    m = _POST_MEDIATYPE_RE.search(html)
+    m = _POST_MEDIATYPE_RE.search(_search_html)
     if m:
         info.media_type = int(m.group(1))
 
-    m = _POST_PRODUCT_RE.search(html)
+    m = _POST_PRODUCT_RE.search(_search_html)
     if m:
         info.product_type = m.group(1)
 
-    m = _POST_CAROUSEL_RE.search(html)
+    m = _POST_CAROUSEL_RE.search(_search_html)
     if m:
         info.carousel_count = int(m.group(1))
 
@@ -1063,7 +1079,7 @@ def parse_post_html(html: str, shortcode: str) -> PostInfo:
         info.post_type = _MEDIA_TYPE_LABEL.get(info.media_type, "unknown")
 
     # ── Caption ───────────────────────────────────────────────────────────────
-    m = _POST_CAPTION_RE.search(html)
+    m = _POST_CAPTION_RE.search(_search_html)
     if m:
         raw_cap = m.group(1)
         # Unescape JSON string escapes: \n \t \" \\ \uXXXX
@@ -1076,34 +1092,34 @@ def parse_post_html(html: str, shortcode: str) -> PostInfo:
         info.mentions = _MENTION_RE.findall(info.caption)
 
     # ── Dimensions / duration ─────────────────────────────────────────────────
-    m = _POST_WIDTH_RE.search(html)
+    m = _POST_WIDTH_RE.search(_search_html)
     if m:
         info.width = int(m.group(1))
 
-    m = _POST_HEIGHT_RE.search(html)
+    m = _POST_HEIGHT_RE.search(_search_html)
     if m:
         info.height = int(m.group(1))
 
-    m = _POST_DURATION_RE.search(html)
+    m = _POST_DURATION_RE.search(_search_html)
     if m:
         info.duration_secs = float(m.group(1))
 
     # ── Display URL (first image) ─────────────────────────────────────────────
-    m = _POST_DISPLAYURL_RE.search(html)
+    m = _POST_DISPLAYURL_RE.search(_search_html)
     if m:
         info.display_url = m.group(1)
 
     # ── Coauthors ────────────────────────────────────────────────────────────
-    m = _POST_COAUTHOR_RE.search(html)
+    m = _POST_COAUTHOR_RE.search(_search_html)
     if m:
         info.coauthors = _POST_USERNAME_RE.findall(m.group(1))
 
     # ── Music (reels) ────────────────────────────────────────────────────────
-    m = _POST_MUSIC_ARTIST.search(html)
+    m = _POST_MUSIC_ARTIST.search(_search_html)
     if m:
         info.music_artist = m.group(1)
 
-    m = _POST_MUSIC_TITLE.search(html)
+    m = _POST_MUSIC_TITLE.search(_search_html)
     if m:
         info.music_title = m.group(1)
 

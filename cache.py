@@ -140,7 +140,12 @@ class SmartCache:
         )
 
     def stats_sync(self) -> CacheStats:
-        """Non-blocking snapshot — values may be slightly inconsistent."""
+        """Non-blocking snapshot — values may be slightly inconsistent.
+
+        Note: all values are approximate; reads are performed without holding
+        the lock, so counters and entry counts may not reflect a consistent
+        point-in-time state.
+        """
         hits = self._hits
         misses = self._misses
         total = hits + misses
@@ -199,7 +204,7 @@ class SmartCache:
                 self._coalesced += 1
                 fut = existing
             else:
-                fut = asyncio.get_event_loop().create_future()
+                fut = asyncio.get_running_loop().create_future()
                 self._inflight[key] = fut
                 is_owner = True
 
@@ -220,17 +225,17 @@ class SmartCache:
             effective_ttl = int(ttl) if ttl is not None else self._default_ttl
             await self.set(key, value, effective_ttl)
 
-        async with self._lock:
-            self._inflight.pop(key, None)
         if not fut.done():
             fut.set_result(value)
+        async with self._lock:
+            self._inflight.pop(key, None)
         return value
 
     async def warm(
         self,
         key: str,
         fetch_fn: Callable,
-        ttl: Optional[float] = None,
+        ttl: Optional[int] = None,
     ) -> Any:
         """Pre-populate the cache for *key*. Sync or async fetch_fn supported."""
         cached = await self.get(key)
