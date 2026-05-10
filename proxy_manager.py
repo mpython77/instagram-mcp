@@ -1,0 +1,346 @@
+"""
+Smart proxy manager — fast rotation, with exclude, no waiting.
+
+Proxy-first philosophy:
+  - DIFFERENT proxy on each retry (exclude parameter)
+  - No waiting — switching proxy resolves the issue immediately
+  - Short cooldown by default — disabled proxies return quickly
+  - Weighted scoring: success_rate / avg_latency
+  - Fallback: all proxies down → direct connection (if enabled)
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+import time
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Set
+
+from .models import ProxyStatus
+
+logger = logging.getLogger("instagram_mcp.proxy_manager")
+
+_VALID_SCHEMES = ("http://", "https://", "socks5://", "socks4://")
+
+
+def _validate_proxy_url(url: str) -> None:
+    """Validate a proxy URL, raising ValueError with a clear message if invalid."""
+    if not any(url.startswith(scheme) for scheme in _VALID_SCHEMES):
+        raise ValueError(
+            f"Invalid proxy URL {url!r}: must start with one of "
+            f"{', '.join(_VALID_SCHEMES)}"
+        )
+    # Extract the host part after scheme/userinfo
+    rest = url.split("://", 1)[1]
+    if "@" in rest:
+        rest = rest.split("@", 1)[1]
+    host = rest.split("/")[0].split(":")[0]
+    if not host:
+        raise ValueError(
+            f"Invalid proxy URL {url!r}: must contain a host after the scheme"
+        )
+
+
+def _mask_proxy_url(url: str) -> str:
+    """Hide user/password from proxy URL."""
+    return re.sub(r"//[^@]+@", "//***@", url)
+
+
+@dataclass(slots=True)
+class _ProxyState:
+    """Internal state of a single proxy."""
+    url: str
+    is_active: bool = True
+    consecutive_fails: int = 0
+    backoff_steps: int = 0          # exponential backoff counter (separate from consecutive_fails)
+    total_requests: int = 0
+    total_success: int = 0
+    total_latency: float = 0.0
+    last_fail_time: float = 0.0
+    cooldown_until: float = 0.0
+    last_used: float = 0.0
+
+    @property
+    def avg_latency(self) -> float:
+        if self.total_success == 0:
+            return 999.0
+        return self.total_latency / self.total_success
+
+    @property
+    def success_rate(self) -> float:
+        if self.total_requests == 0:
+            return 0.5  # neutral starting score
+        return self.total_success / self.total_requests
+
+    @property
+    def score(self) -> float:
+        """Higher is better. Used by `get_best_proxy`."""
+        if self.total_requests == 0:
+            return 1.0  # untried proxy gets a fair shot
+        return (self.success_rate * 100) / (self.avg_latency + 1.0)
+
+
+class ProxyManager:
+    """Smart proxy rotation — always different proxy, no waiting."""
+
+    def __init__(
+        self,
+        proxy_urls: Optional[List[str]] = None,
+        max_fails: int = 5,
+        cooldown_seconds: int = 30,
+        max_cooldown_seconds: float = 300.0,
+        auto_fallback: bool = True,
+        health_check_interval: int = 30,
+    ) -> None:
+        self._proxies: List[_ProxyState] = [
+            _ProxyState(url=u) for u in (proxy_urls or [])
+        ]
+        # Index by URL for O(1) lookup in report_success/report_failure
+        self._by_url: Dict[str, _ProxyState] = {p.url: p for p in self._proxies}
+        self._max_fails: int = max_fails
+        self._cooldown: int = cooldown_seconds
+        self._max_cooldown: float = max_cooldown_seconds
+        self._auto_fallback: bool = auto_fallback
+        self._health_check_interval: int = health_check_interval
+        self._lock: asyncio.Lock = asyncio.Lock()
+        self._total_fallbacks: int = 0
+        self._health_task: Optional[asyncio.Task] = None  # type: ignore[type-arg]
+
+    # ── Properties ───────────────────────────────────────────────────────────
+
+    @property
+    def has_proxies(self) -> bool:
+        return bool(self._proxies)
+
+    # ── Health checking ──────────────────────────────────────────────────────
+
+    async def _health_check_loop(self) -> None:
+        """Periodically reactivate proxies whose cooldowns expired and grace-reset stale ones."""
+        try:
+            while True:
+                await asyncio.sleep(self._health_check_interval)
+                now = time.time()
+                async with self._lock:
+                    for p in self._proxies:
+                        if not p.is_active and now > p.cooldown_until:
+                            p.is_active = True
+                            p.consecutive_fails = 0
+                            p.backoff_steps = 0
+                            logger.info(
+                                "Health check: proxy reactivated: %s",
+                                _mask_proxy_url(p.url),
+                            )
+                        elif (
+                            p.is_active
+                            and (now - p.last_used) >= self._health_check_interval
+                            and (now - p.last_fail_time) >= self._health_check_interval
+                            and p.consecutive_fails > 0
+                        ):
+                            # Idle proxy: forgive past failures so it gets a fresh shot
+                            p.consecutive_fails = 0
+                            p.backoff_steps = max(0, p.backoff_steps - 1)
+                            logger.debug(
+                                "Health check grace period applied: %s",
+                                _mask_proxy_url(p.url),
+                            )
+        except asyncio.CancelledError:
+            logger.debug("Proxy health check loop cancelled")
+
+    def start_health_checks(self) -> None:
+        """Start the background health check task (idempotent)."""
+        if self._health_task is None or self._health_task.done():
+            self._health_task = asyncio.ensure_future(self._health_check_loop())
+            logger.info(
+                "Proxy health check loop started (interval=%ds)",
+                self._health_check_interval,
+            )
+
+    async def stop_health_checks(self) -> None:
+        """Cancel the background health check task (graceful shutdown)."""
+        task = self._health_task
+        if task is None or task.done():
+            return
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+        self._health_task = None
+
+    # ── Internal: shared selection routine ───────────────────────────────────
+
+    def _reactivate_expired(self, now: float) -> None:
+        """Re-enable proxies whose cooldown has expired. Caller must hold _lock."""
+        for p in self._proxies:
+            if not p.is_active and now > p.cooldown_until:
+                p.is_active = True
+                p.consecutive_fails = 0
+                p.backoff_steps = 0
+                logger.info("Proxy reactivated: %s", _mask_proxy_url(p.url))
+
+    # ── Proxy selection ──────────────────────────────────────────────────────
+
+    async def get_best_proxy(
+        self, exclude: Optional[Set[str]] = None
+    ) -> Optional[str]:
+        """
+        Return the highest-scoring proxy not in *exclude*.
+
+        Score formula: (success_rate * 100) / (avg_latency + 1)
+        Untried proxies get a neutral starting score of 1.0.
+
+        Returns None when:
+          - No proxies are configured (always direct), or
+          - All active proxies are excluded AND auto_fallback is enabled, or
+          - All proxies are in cooldown.
+        """
+        if not self._proxies:
+            return None
+
+        excl = exclude or set()
+
+        async with self._lock:
+            now = time.time()
+            self._reactivate_expired(now)
+
+            available = [
+                p for p in self._proxies
+                if p.is_active and p.url not in excl
+            ]
+
+            # If exclude exhausted the pool, fall back to any active proxy
+            if not available:
+                available = [p for p in self._proxies if p.is_active]
+
+            if not available:
+                if self._auto_fallback:
+                    self._total_fallbacks += 1
+                    logger.warning(
+                        "All proxies in cooldown — direct connection (fallback #%d)",
+                        self._total_fallbacks,
+                    )
+                return None
+
+            best = max(available, key=lambda p: p.score)
+            best.last_used = now
+            return best.url
+
+    # Backwards-compatible alias
+    get_proxy = get_best_proxy
+
+    # ── Reporting ────────────────────────────────────────────────────────────
+
+    async def report_success(self, proxy_url: str, latency: float) -> None:
+        """Successful request — reset backoff counters."""
+        async with self._lock:
+            p = self._by_url.get(proxy_url)
+            if p is None:
+                return
+            p.consecutive_fails = 0
+            p.backoff_steps = 0
+            p.total_requests += 1
+            p.total_success += 1
+            p.total_latency += latency
+
+    async def report_failure(self, proxy_url: str, error: str = "") -> None:
+        """Failed request — exponential backoff cooldown when threshold hit."""
+        async with self._lock:
+            p = self._by_url.get(proxy_url)
+            if p is None:
+                return
+            p.consecutive_fails += 1
+            p.total_requests += 1
+            p.last_fail_time = time.time()
+
+            if p.consecutive_fails >= self._max_fails:
+                p.backoff_steps = min(p.backoff_steps + 1, 8)
+                # Exponential backoff capped at max_cooldown
+                backoff = min(
+                    self._cooldown * (2 ** p.backoff_steps),
+                    self._max_cooldown,
+                )
+                p.is_active = False
+                p.cooldown_until = time.time() + backoff
+                logger.warning(
+                    "Proxy disabled (%dx fails): %s — cooldown %.0fs",
+                    p.consecutive_fails,
+                    _mask_proxy_url(p.url),
+                    backoff,
+                )
+
+    # ── CRUD ─────────────────────────────────────────────────────────────────
+
+    async def add_proxy(self, url: str) -> bool:
+        """Add new proxy (async-safe)."""
+        url = url.strip()
+        if not url:
+            return False
+        _validate_proxy_url(url)
+        async with self._lock:
+            if url in self._by_url:
+                return False
+            state = _ProxyState(url=url)
+            self._proxies.append(state)
+            self._by_url[url] = state
+        logger.info("New proxy added: %s", _mask_proxy_url(url))
+        return True
+
+    async def remove_proxy(self, url: str) -> bool:
+        """Remove proxy (async-safe)."""
+        url = url.strip()
+        async with self._lock:
+            state = self._by_url.pop(url, None)
+            if state is None:
+                return False
+            self._proxies.remove(state)
+            logger.info("Proxy removed: %s", _mask_proxy_url(url))
+            return True
+
+    async def reset_all(self) -> None:
+        """Reset all proxy state."""
+        async with self._lock:
+            for p in self._proxies:
+                p.is_active = True
+                p.consecutive_fails = 0
+                p.backoff_steps = 0
+                p.total_requests = 0
+                p.total_success = 0
+                p.total_latency = 0.0
+                p.last_fail_time = 0.0
+                p.cooldown_until = 0.0
+
+    # ── Status / diagnostics ─────────────────────────────────────────────────
+
+    async def get_all_status(self) -> List[ProxyStatus]:
+        """Per-proxy status snapshot."""
+        async with self._lock:
+            now = time.time()
+            return [
+                ProxyStatus(
+                    url_masked=_mask_proxy_url(p.url),
+                    is_active=p.is_active,
+                    consecutive_fails=p.consecutive_fails,
+                    total_requests=p.total_requests,
+                    total_success=p.total_success,
+                    success_rate=round(p.success_rate, 3),
+                    avg_latency_ms=round(p.avg_latency * 1000, 1),
+                    cooldown_remaining_s=(
+                        max(0, int(p.cooldown_until - now)) if not p.is_active else 0
+                    ),
+                )
+                for p in self._proxies
+            ]
+
+    @property
+    def stats(self) -> Dict[str, object]:
+        """Approximate snapshot — no lock, for diagnostics only."""
+        active = sum(1 for p in self._proxies if p.is_active)
+        return {
+            "total_proxies": len(self._proxies),
+            "active_proxies": active,
+            "disabled_proxies": len(self._proxies) - active,
+            "total_fallbacks": self._total_fallbacks,
+            "auto_fallback_enabled": self._auto_fallback,
+        }
