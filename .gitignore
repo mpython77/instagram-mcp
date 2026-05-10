@@ -25,6 +25,14 @@ feature/
 
 # Logs
 *.log
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.env
 
 # IDE
 .idea/

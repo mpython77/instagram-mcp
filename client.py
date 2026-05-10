@@ -720,7 +720,7 @@ class InstagramClient:
             pages += 1
             has_more = bool(page.get("has_next_page"))
             cursor = page.get("end_cursor") or ""
-            if not has_more or not cursor or len(edges) < page_size:
+            if not has_more or not cursor:
                 break
 
         return {
@@ -876,7 +876,7 @@ class InstagramClient:
             pages += 1
             has_more = bool(page.get("has_more"))
             max_id = page.get("next_max_id") or ""
-            if not has_more or not max_id or len(items) < page_size:
+            if not has_more or not max_id:
                 break
 
         return {
@@ -1044,7 +1044,7 @@ class InstagramClient:
             pages += 1
             has_more = bool(page.get("has_next_page"))
             cursor = page.get("end_cursor") or ""
-            if not has_more or not cursor or len(edges) < page_size:
+            if not has_more or not cursor:
                 break
 
         return {

@@ -597,6 +597,8 @@ def parse_tagged_tab_edges(
         if len(result) >= max_posts:
             break
 
+        if not isinstance(edge, dict):
+            continue
         node = edge.get("node") or edge  # edges may already be unwrapped
         if not isinstance(node, dict):
             continue
@@ -773,6 +775,8 @@ def parse_reels_edges(
         if len(result) >= max_reels:
             break
 
+        if not isinstance(edge, dict):
+            continue
         node = edge.get("node") or edge
         if not isinstance(node, dict):
             continue
