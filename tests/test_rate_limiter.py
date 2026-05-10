@@ -1,6 +1,6 @@
 import asyncio
 import pytest
-from rate_limiter import AdaptiveRateLimiter
+from instagram_mcp.rate_limiter import AdaptiveRateLimiter
 import time
 
 @pytest.mark.asyncio

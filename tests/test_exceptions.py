@@ -1,5 +1,5 @@
 import pytest
-from exceptions import (
+from instagram_mcp.exceptions import (
     InstagramMCPError,
     UserNotFoundError,
     PostNotFoundError,

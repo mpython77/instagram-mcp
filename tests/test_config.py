@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from config import MCPConfig, _load_proxy_file
+from instagram_mcp.config import MCPConfig, _load_proxy_file
 
 def test_mcp_config_defaults():
     cfg = MCPConfig()
@@ -77,7 +77,7 @@ def test_load_proxy_file_from_parent(tmp_path):
     parent_file = tmp_path / "proxies.txt"
     parent_file.write_text("http://p1\n# comment\nhttp://p2\n\n  \n")
     
-    with mock.patch("config.Path") as mock_path:
+    with mock.patch("instagram_mcp.config.Path") as mock_path:
         # Mock Path(__file__).parent.parent / "proxies.txt" to point to our temp file
         instance1 = mock.MagicMock()
         instance1.is_file.return_value = True
@@ -93,7 +93,7 @@ def test_load_proxy_file_from_parent(tmp_path):
     # Let's patch _load_proxy_file's internal Path directly by patching Path in config
     pass
 
-@mock.patch("config.Path")
+@mock.patch("instagram_mcp.config.Path")
 def test_load_proxy_file_mocked_path(mock_path_cls):
     # Setup mocks for the paths
     parent_path_mock = mock.MagicMock()
@@ -126,7 +126,7 @@ def test_load_proxy_file_mocked_path(mock_path_cls):
     res = _load_proxy_file()
     assert res == []
 
-@mock.patch("config._load_proxy_file")
+@mock.patch("instagram_mcp.config._load_proxy_file")
 @mock.patch.dict(os.environ, {}, clear=True)
 def test_mcp_config_proxies_fallback(mock_load):
     mock_load.return_value = ["http://file1"]
