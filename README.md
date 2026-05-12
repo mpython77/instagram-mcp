@@ -64,7 +64,7 @@ All returned data is formatted as LLM-readable Markdown with tables and summarie
 | Tools | 13 MCP tools across two auth tiers |
 | Anonymous tools | 10 — no login, no cookies, no credentials |
 | Authenticated tools | 3 — require exported browser cookies |
-| Max posts (paginated) | 200 via GraphQL cursor pagination |
+| Max posts (paginated) | 200 via v1/feed/user + max_id pagination |
 | Batch capacity | Up to 500 profiles in one `batch_scrape` call |
 | Cache | Per-type TTL cache — repeated lookups are instant |
 | Rate limiter | Adaptive token-bucket + circuit breaker + jitter |
@@ -152,7 +152,7 @@ Fetches a public account's profile data. One API call covers profile, feed tags,
 
 ### `instagram_feed_deep`
 
-Paginated feed analysis. Starts with the first 12 posts from the profile endpoint, then continues via GraphQL cursor until `max_posts` is reached or there are no more posts.
+Paginated feed analysis. Starts with the first 12 posts from the profile endpoint, then continues via `v1/feed/user` with `max_id` pagination until `max_posts` is reached or there are no more posts.
 
 **Parameters:**
 
@@ -174,7 +174,7 @@ Paginated feed analysis. Starts with the first 12 posts from the profile endpoin
 - `taken_at` — Unix timestamp, `taken_at_str` — human-readable UTC
 - `display_url` — thumbnail image URL
 
-**Also returns:** `pages_fetched` (number of GraphQL pages fetched), `has_more` (whether more posts exist beyond the requested limit)
+**Also returns:** `has_more` (whether more posts exist beyond the requested limit)
 
 ---
 
@@ -977,6 +977,7 @@ Is the account active or dead?    → instagram_profile (check_alive=True, inclu
 
 - Python 3.10 or higher
 - `uv` package manager (recommended) or `pip`
+- **Windows only:** [Visual C++ Redistributable 2015–2022](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist) — required by `curl_cffi`'s bundled `libcurl`
 
 ### Step 1 — Clone the repository
 
@@ -1135,7 +1136,14 @@ INSTAGRAM_MCP_PROXIES="http://u:p@h1:8080,http://u:p@h2:8080"
 
 ## Connecting to Claude Desktop
 
-Add to `~/.config/claude/claude_desktop_config.json` (macOS/Linux) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+Config file locations:
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+- **Linux:** `~/.config/Claude/claude_desktop_config.json`
+
+Add the following to that file:
+
+**macOS / Linux:**
 
 ```json
 {
@@ -1153,6 +1161,29 @@ Add to `~/.config/claude/claude_desktop_config.json` (macOS/Linux) or `%APPDATA%
       "env": {
         "INSTAGRAM_MCP_COOKIES": "/absolute/path/to/cookies.txt",
         "INSTAGRAM_MCP_PROXIES": "http://user:pass@proxy:8080"
+      }
+    }
+  }
+}
+```
+
+**Windows** (use forward slashes or escaped backslashes in the JSON):
+
+```json
+{
+  "mcpServers": {
+    "instagram": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "C:/Users/YourName/instagram_mcp",
+        "run",
+        "python",
+        "-m",
+        "instagram_mcp"
+      ],
+      "env": {
+        "INSTAGRAM_MCP_COOKIES": "C:/Users/YourName/cookies.txt"
       }
     }
   }
@@ -1292,7 +1323,8 @@ instagram_mcp/
 
 | Endpoint | Auth | Used by |
 |----------|------|---------|
-| `GET i.instagram.com/api/v1/users/web_profile_info/?username={}` | None | All profile-based tools |
+| `GET i.instagram.com/api/v1/users/web_profile_info/?username={}` | None | All profile-based tools (profile + first page) |
+| `GET i.instagram.com/api/v1/feed/user/{id}/?count={n}&max_id={pk}` | None | Feed pagination — `feed_deep`, `analyze_engagement`, `find_collab_network`, `batch_scrape` |
 | `POST www.instagram.com/graphql/query/` | Session cookies + CSRF | `tagged_by`, `reposts`, `reels` |
 | `GET www.instagram.com/api/v1/media/{id}/comments/` | None | `post_comments` |
 | `GET www.instagram.com/p/{shortcode}/` | None | `post` |
@@ -1312,10 +1344,11 @@ instagram_mcp/
 
 | Tool | `fb_api_req_friendly_name` | `doc_id` |
 |------|---------------------------|----------|
-| Feed (anonymous) | `PolarisProfilePostsTabContentQuery_connection` | `26442143102071041` |
 | Tagged Tab | `PolarisProfileTaggedTabContentQuery_connection` | `26707104818956021` |
 | Reposts Tab | `PolarisProfileRepostsTabContentRefetchQuery` | `35095888563388407` |
 | Reels Tab | `PolarisProfileReelsTabContentQuery_connection` | `26292852833730510` |
+
+> **Feed pagination uses `v1/feed/user`** — not GraphQL. The old `doc_id: 26442143102071041` was removed because it returned the same 12 posts regardless of cursor (pagination was broken server-side). The `v1/feed/user/?count=50&max_id={last_pk}` REST endpoint works correctly and returns 50 unique posts per page.
 
 ### Shortcode ↔ media_id conversion
 

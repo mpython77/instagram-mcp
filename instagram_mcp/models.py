@@ -149,6 +149,7 @@ class InstagramPost:
     music_title: str = ""
     location: Optional[Dict[str, Any]] = None
     hashtags: List[str] = field(default_factory=list)
+    is_pinned: bool = False
 
     def __post_init__(self) -> None:
         if self.likes < 0:
@@ -432,11 +433,36 @@ class EngagementAnalysisInput(BaseModel):
         ge=1,
         le=365,
     )
+    since_timestamp: Optional[int] = Field(
+        default=None,
+        description="Only include posts after this Unix timestamp (optional).",
+    )
+    until_timestamp: Optional[int] = Field(
+        default=None,
+        description="Only include posts before this Unix timestamp (optional).",
+    )
+    since_date: str = Field(
+        default="",
+        description=(
+            "Filter posts after this date. Accepts DD.MM.YYYY, YYYY-MM-DD or DD/MM/YYYY. "
+            "Example: '01.01.2026' to analyse only 2026 posts."
+        ),
+    )
+    until_date: str = Field(
+        default="",
+        description="Filter posts before this date. Same formats as since_date.",
+    )
 
     @field_validator("username")
     @classmethod
     def clean_username(cls, v: str) -> str:
         return _clean_username(v)
+
+    def resolved_since(self) -> Optional[int]:
+        return _parse_user_date(self.since_date) if self.since_date else self.since_timestamp
+
+    def resolved_until(self) -> Optional[int]:
+        return _parse_user_date(self.until_date) if self.until_date else self.until_timestamp
 
 
 class CollabNetworkInput(BaseModel):
@@ -467,11 +493,36 @@ class CollabNetworkInput(BaseModel):
         ge=1,
         le=50,
     )
+    since_timestamp: Optional[int] = Field(
+        default=None,
+        description="Only include posts after this Unix timestamp (optional).",
+    )
+    until_timestamp: Optional[int] = Field(
+        default=None,
+        description="Only include posts before this Unix timestamp (optional).",
+    )
+    since_date: str = Field(
+        default="",
+        description=(
+            "Filter posts after this date. Accepts DD.MM.YYYY, YYYY-MM-DD or DD/MM/YYYY. "
+            "Example: '01.01.2026' to map collabs from 2026 only."
+        ),
+    )
+    until_date: str = Field(
+        default="",
+        description="Filter posts before this date. Same formats as since_date.",
+    )
 
     @field_validator("username")
     @classmethod
     def clean_username(cls, v: str) -> str:
         return _clean_username(v)
+
+    def resolved_since(self) -> Optional[int]:
+        return _parse_user_date(self.since_date) if self.since_date else self.since_timestamp
+
+    def resolved_until(self) -> Optional[int]:
+        return _parse_user_date(self.until_date) if self.until_date else self.until_timestamp
 
 
 class CompareProfilesInput(BaseModel):
@@ -500,8 +551,8 @@ class DeepFeedInput(BaseModel):
         default=50,
         description=(
             "Maximum posts to fetch and analyse. Range: 1-200. "
-            "First 12 come free from the profile request. "
-            "Each additional 12 posts = 1 extra GraphQL request."
+            "Uses v1/feed/user pagination (50 posts per page): "
+            "100 posts ≈ 2 requests, 200 posts ≈ 4 requests."
         ),
         ge=1,
         le=200,
@@ -822,9 +873,11 @@ class PostInput(BaseModel):
     post: str = Field(
         ...,
         description=(
-            "Instagram post shortcode or full URL. Examples:\n"
+            "Instagram post shortcode or full URL. All URL types supported:\n"
             "  'DXjuqH9nDVE'\n"
-            "  'https://www.instagram.com/p/DXjuqH9nDVE/'"
+            "  'https://www.instagram.com/p/DXjuqH9nDVE/'\n"
+            "  'https://www.instagram.com/reel/DXjuqH9nDVE/'\n"
+            "  'https://www.instagram.com/tv/DXjuqH9nDVE/'"
         ),
         min_length=5,
     )
@@ -833,8 +886,8 @@ class PostInput(BaseModel):
     @classmethod
     def extract_shortcode(cls, v: str) -> str:
         v = v.strip()
-        # Full URL: extract shortcode from /p/{code}/
-        m = re.search(r'/p/([A-Za-z0-9_\-]+)', v)
+        # Full URL: extract shortcode from /p/, /reel/, or /tv/ paths
+        m = re.search(r'/(?:p|reel|tv)/([A-Za-z0-9_\-]+)', v)
         if m:
             return m.group(1)
         # Bare shortcode: must be alphanumeric + - _
@@ -894,12 +947,15 @@ class ServerInput(BaseModel):
         default="status",
         description=(
             "Action to perform:\n"
-            "  'status' — show cache hit rate, proxy health, rate limiter state\n"
-            "  'clear_cache' — flush all cached data (or just one user with username=)\n"
-            "  'clear_user' — flush cache for a specific user only"
+            "  'status'      — show cache hit rate, proxy health, rate limiter state\n"
+            "  'clear_cache' — flush ALL cached profiles and feeds (full reset)\n"
+            "  'clear_user'  — flush cache for ONE user only (provide username=)"
         ),
     )
     username: str = Field(
         default="",
-        description="For action='clear_user': the Instagram username to clear. Leave empty for 'status'/'clear_cache'.",
+        description=(
+            "Instagram username for action='clear_user'. "
+            "Leave empty for 'status' or 'clear_cache'."
+        ),
     )

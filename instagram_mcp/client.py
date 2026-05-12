@@ -360,6 +360,123 @@ class InstagramClient:
         # Single-flight: dedup concurrent calls for the same username
         return await self._cache.get_or_fetch(cache_key, _do_fetch, ttl=ttl)
 
+    # ── v1/feed/user fetch (max_id pagination) ──────────────────────────────
+
+    async def _fetch_feed_page_v1_attempt(
+        self, url: str, proxy_url: Optional[str]
+    ) -> Dict[str, Any]:
+        """Single attempt: fetch one v1/feed/user page."""
+        session = await self._get_session(proxy_url)
+        resp = await session.get(url)
+        status = resp.status_code
+
+        if status == 200:
+            try:
+                d = resp.json()
+                return {
+                    "ok": True,
+                    "items": d.get("items", []),
+                    "more_available": d.get("more_available", False),
+                    "next_max_id": d.get("next_max_id", ""),
+                    "status_code": 200,
+                }
+            except (ValueError, TypeError):
+                return {"ok": False, "items": [], "more_available": False, "next_max_id": "", "status_code": 200}
+
+        if status == 429:
+            return {"ok": False, "items": [], "more_available": False, "next_max_id": "", "status_code": 429}
+
+        return {"ok": False, "items": [], "more_available": False, "next_max_id": "", "status_code": status}
+
+    async def fetch_feed_items(
+        self,
+        user_id: str,
+        max_posts: int,
+        since_timestamp: Optional[int] = None,
+        cache_ttl: Optional[int] = None,
+        page_cb=None,
+    ) -> List[Dict]:
+        """
+        Fetch posts via v1/feed/user with max_id pagination.
+
+        First page uses count=12, subsequent pages use count=50.
+        When since_timestamp is set, fetches up to 1000 posts to cover the range.
+        Returns raw item dicts in v1/feed/user format (104 fields per item).
+
+        page_cb: optional async callable(page_num, items_so_far, target) — called
+                 after each page so callers can report per-page progress.
+        """
+        items: List[Dict] = []
+        fetch_limit = max(max_posts, 1000) if since_timestamp else max_posts
+        current_max_id: Optional[str] = None
+        first_page = True
+        page_num = 0
+        STOP_THRESHOLD = 100
+        consecutive_old = 0
+        feed_endpoint = self._config.ig_feed_endpoint
+        ttl = cache_ttl or self._config.cache_feed_ttl
+
+        while len(items) < fetch_limit:
+            count = 12 if first_page else 50
+            url = f"{feed_endpoint.format(user_id)}?count={count}"
+            if current_max_id:
+                url += f"&max_id={current_max_id}"
+
+            cache_key = f"feed_v1:{user_id}:{current_max_id or 'first'}"
+            cached = await self._cache.get(cache_key)
+
+            if cached is not None:
+                page_result = cached
+            else:
+                await self._rate_limiter.acquire()
+                try:
+                    _url = url
+                    page_result = await self._with_proxy_retry(
+                        op_name=f"feed_v1(uid={user_id})",
+                        single_attempt=lambda p, u=_url: self._fetch_feed_page_v1_attempt(u, p),
+                    )
+                except FetchError as e:
+                    logger.debug("feed_v1 fetch failed: %s", e)
+                    break
+
+                if not page_result.get("ok"):
+                    break
+                await self._cache.set(cache_key, page_result, ttl)
+
+            first_page = False
+            page_num += 1
+            batch = page_result.get("items") or []
+            if not batch:
+                break
+
+            items.extend(batch)
+
+            if page_cb is not None:
+                try:
+                    coro = page_cb(page_num, len(items), fetch_limit)
+                    if asyncio.iscoroutine(coro):
+                        await coro
+                except Exception:
+                    pass
+
+            if since_timestamp:
+                for item in batch:
+                    t = item.get("taken_at", 0)
+                    if t and t < since_timestamp:
+                        consecutive_old += 1
+                    elif t and t >= since_timestamp:
+                        consecutive_old = 0
+                if consecutive_old >= STOP_THRESHOLD:
+                    break
+
+            next_max_id = page_result.get("next_max_id", "")
+            if not page_result.get("more_available") or not next_max_id:
+                break
+            current_max_id = str(next_max_id)
+
+        logger.debug("feed_v1 fetched uid=%s: %d items in %d pages", user_id, len(items), page_num)
+        return items
+
     # ── GraphQL feed page fetch ──────────────────────────────────────────────
 
     async def _fetch_graphql_attempt(

@@ -33,6 +33,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 def mock_client():
     client = MagicMock()
     client.fetch_user = AsyncMock()
+    client.fetch_feed_items = AsyncMock(return_value=[])
     client.fetch_user_feed = AsyncMock()
     client.fetch_bulk = AsyncMock()
     client.fetch_post = AsyncMock()
@@ -152,17 +153,17 @@ async def test_instagram_profile_error(tools, mock_client, mock_ctx):
 
 @pytest.mark.asyncio
 async def test_instagram_feed_deep(tools, mock_client, mock_ctx):
+    import time as _time
+    now = int(_time.time())
     mock_client.fetch_user.return_value = {
         "id": "123", "username": "testuser",
-        "edge_owner_to_timeline_media": {
-            "count": 2,
-            "edges": [
-                {"node": {"shortcode": "p1", "edge_liked_by": {"count": 10}, "edge_media_to_comment": {"count": 2}, "taken_at_timestamp": 1000}},
-                {"node": {"shortcode": "p2", "edge_liked_by": {"count": 20}, "edge_media_to_comment": {"count": 4}, "taken_at_timestamp": 2000}},
-            ],
-            "page_info": {"has_next_page": False, "end_cursor": None}
-        }
+        "edge_owner_to_timeline_media": {"count": 2, "edges": [], "page_info": {"has_next_page": False}},
+        "edge_followed_by": {"count": 1000},
     }
+    mock_client.fetch_feed_items.return_value = [
+        {"code": "p1", "taken_at": now - 86400, "like_count": 10, "comment_count": 2, "media_type": 1},
+        {"code": "p2", "taken_at": now - 172800, "like_count": 20, "comment_count": 4, "media_type": 1},
+    ]
     params = DeepFeedInput(username="testuser", max_posts=10)
     result = await tools["instagram_feed_deep"](params, mock_ctx)
     assert "testuser" in result
@@ -170,14 +171,15 @@ async def test_instagram_feed_deep(tools, mock_client, mock_ctx):
 
 @pytest.mark.asyncio
 async def test_instagram_analyze_engagement(tools, mock_client, mock_ctx):
+    import time as _time
+    now = int(_time.time())
     mock_client.fetch_user.return_value = {
         "id": "123", "username": "testuser", "edge_followed_by": {"count": 1000},
-        "edge_owner_to_timeline_media": {
-            "count": 1,
-            "edges": [{"node": {"shortcode": "p1", "edge_liked_by": {"count": 10}, "edge_media_to_comment": {"count": 2}}}],
-            "page_info": {"has_next_page": False}
-        }
+        "edge_owner_to_timeline_media": {"count": 1, "edges": [], "page_info": {"has_next_page": False}},
     }
+    mock_client.fetch_feed_items.return_value = [
+        {"code": "p1", "taken_at": now - 86400, "like_count": 10, "comment_count": 2, "media_type": 1},
+    ]
     params = EngagementAnalysisInput(username="testuser")
     result = await tools["instagram_analyze_engagement"](params, mock_ctx)
     assert "Engagement Analysis" in result
@@ -185,19 +187,21 @@ async def test_instagram_analyze_engagement(tools, mock_client, mock_ctx):
 
 @pytest.mark.asyncio
 async def test_instagram_find_collab_network(tools, mock_client, mock_ctx):
+    import time as _time
+    now = int(_time.time())
     mock_client.fetch_user.return_value = {
         "id": "123", "username": "testuser",
-        "edge_owner_to_timeline_media": {
-            "count": 1,
-            "edges": [{
-                "node": {
-                    "shortcode": "p1",
-                    "edge_media_to_tagged_user": {"edges": [{"node": {"user": {"username": "collab1"}}}]}
-                }
-            }],
-            "page_info": {"has_next_page": False}
-        }
+        "edge_owner_to_timeline_media": {"count": 1, "edges": [], "page_info": {"has_next_page": False}},
+        "edge_followed_by": {"count": 500},
     }
+    mock_client.fetch_feed_items.return_value = [
+        {
+            "code": "p1",
+            "taken_at": now - 86400,
+            "media_type": 1,
+            "usertags": {"in": [{"user": {"username": "collab1"}}]},
+        }
+    ]
     params = CollabNetworkInput(username="testuser")
     result = await tools["instagram_find_collab_network"](params, mock_ctx)
     assert "Collaboration Network" in result

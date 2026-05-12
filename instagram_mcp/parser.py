@@ -108,11 +108,19 @@ def _get_post_type_and_carousel(node: dict) -> Tuple[str, int]:
     return "image", 0
 
 
+def _get_is_pinned(node: dict) -> bool:
+    """Check pinned status — works with both API formats.
+    Feed: timeline_pinned_user_ids (non-empty list = pinned)
+    Web:  pinned_for_users (non-empty list = pinned)
+    """
+    return bool(node.get("timeline_pinned_user_ids") or node.get("pinned_for_users"))
+
+
 def _get_usertags(node: dict) -> List[str]:
     """
-    Extract usertags — handles both API formats.
+    Extract usertags — handles both API formats + fb_user_tags.
     Old: edge_media_to_tagged_user.edges[*].node.user.username
-    New: usertags.in[*].user.username
+    New: usertags.in[*].user.username  OR  fb_user_tags.in[*].user.username
     """
     old_edges = (node.get("edge_media_to_tagged_user") or {}).get("edges") or []
     if old_edges:
@@ -121,12 +129,16 @@ def _get_usertags(node: dict) -> List[str]:
             for te in old_edges
             if (te.get("node") or {}).get("user", {}).get("username", "")
         ]
-    # New format
-    return [
-        (u.get("user") or {}).get("username", "").lower()
-        for u in (node.get("usertags") or {}).get("in") or []
-        if (u.get("user") or {}).get("username", "")
-    ]
+    # New format — check both usertags and fb_user_tags
+    seen: Set[str] = set()
+    result = []
+    for key in ("usertags", "fb_user_tags"):
+        for u in (node.get(key) or {}).get("in") or []:
+            username = (u.get("user") or {}).get("username", "").lower()
+            if username and username not in seen:
+                seen.add(username)
+                result.append(username)
+    return result
 
 
 def _get_display_url(node: dict) -> str:
@@ -529,6 +541,7 @@ def parse_feed_tags_from_edges(
             music_title=music_title,
             location=_extract_location(node),
             hashtags=hashtags_list,
+            is_pinned=_get_is_pinned(node),
         )
         result.posts.append(post_info)
         if code:
@@ -547,6 +560,158 @@ def parse_feed_tags_from_edges(
 
     result.tags = sorted(tags_set)
     return result
+
+
+def parse_feed_items(
+    items: List[Dict],
+    max_posts: int = 12,
+    max_age_days: int = 4,
+    since_timestamp: Optional[int] = None,
+    until_timestamp: Optional[int] = None,
+) -> FeedTagResult:
+    """
+    Parse v1/feed/user items into FeedTagResult.
+
+    Uses native feed item format with direct pinned detection via
+    timeline_pinned_user_ids — no timestamp heuristic needed.
+    """
+    result = FeedTagResult()
+    now = time.time()
+    max_age_seconds = float(max_age_days) * 86400.0
+    process_limit = len(items) if since_timestamp else max_posts
+    seen_codes: Set[str] = set()
+    tags_set: Set[str] = set()
+
+    for item in items[:process_limit]:
+        code = _get_shortcode(item)
+        if not code or code in seen_codes:
+            continue
+
+        taken_at = _get_taken_at(item)
+        if not taken_at:
+            continue
+
+        is_pinned = _get_is_pinned(item)
+
+        # Date range filtering
+        in_range = True
+        if until_timestamp and taken_at > until_timestamp:
+            in_range = False
+        if since_timestamp and taken_at < since_timestamp:
+            in_range = False
+
+        if not in_range:
+            if not is_pinned:
+                continue
+
+        seen_codes.add(code)
+        age_sec = now - float(taken_at)
+
+        if not since_timestamp and not is_pinned and age_sec > max_age_seconds:
+            break
+
+        result.posts_checked += 1
+
+        post_type, carousel_count = _get_post_type_and_carousel(item)
+        product_type = item.get("product_type", "") or ""
+
+        usertags_list = _get_usertags(item)
+
+        caption_text = _get_caption_text(item)
+        mentions_list = [m.lower() for m in _MENTION_RE.findall(caption_text)]
+        hashtags_list = [h.lower() for h in _HASHTAG_RE.findall(caption_text)]
+
+        coauthors_list = [
+            p.get("username", "").lower()
+            for p in (item.get("coauthor_producers") or [])
+            if p.get("username")
+        ]
+
+        sponsor_tags_list = [
+            (e.get("node") or {}).get("sponsor", {}).get("username", "").lower()
+            for e in (item.get("edge_media_to_sponsor_user") or {}).get("edges", [])
+            if (e.get("node") or {}).get("sponsor", {}).get("username")
+        ]
+
+        dims = _get_dimensions(item)
+        music_artist, music_title = _extract_music(item)
+
+        ts_str = ""
+        if taken_at:
+            try:
+                ts_str = _dt.fromtimestamp(taken_at).strftime("%Y-%m-%d %H:%M")
+            except (OSError, OverflowError, ValueError):
+                ts_str = ""
+
+        age_days = age_sec / 86400.0 if taken_at else 0
+        post_tags_set = set(usertags_list) | set(mentions_list)
+
+        post_info = InstagramPost(
+            shortcode=code,
+            post_url=f"https://www.instagram.com/p/{code}/" if code else "",
+            post_type=post_type,
+            taken_at=taken_at,
+            taken_at_str=ts_str,
+            age_days=round(age_days, 1),
+            display_url=_get_display_url(item),
+            thumbnail_url=item.get("thumbnail_src", "") or "",
+            is_video=bool(item.get("is_video") or post_type in ("video", "reel", "igtv")),
+            likes=_get_likes(item),
+            comments=_get_comments(item),
+            video_view_count=_get_video_views(item),
+            caption=caption_text,
+            accessibility_caption=item.get("accessibility_caption", "") or "",
+            product_type=product_type,
+            usertags=usertags_list,
+            mentions=mentions_list,
+            coauthors=coauthors_list,
+            sponsor_tags=sponsor_tags_list,
+            carousel_count=carousel_count,
+            width=int(dims.get("width") or 0),
+            height=int(dims.get("height") or 0),
+            music_artist=music_artist,
+            music_title=music_title,
+            location=_extract_location(item),
+            hashtags=hashtags_list,
+            is_pinned=is_pinned,
+        )
+        result.posts.append(post_info)
+
+        if post_tags_set:
+            result.posts_with_tags += 1
+            for tag in post_tags_set:
+                tags_set.add(tag)
+                if tag not in result.tag_shortcodes:
+                    result.tag_shortcodes[tag] = code
+                if tag not in result.tag_timestamps:
+                    result.tag_timestamps[tag] = ts_str
+
+        if result.posts_checked >= max_posts:
+            break
+
+    result.tags = sorted(tags_set)
+    return result
+
+
+def check_dead_account_from_items(
+    items: List[Dict], posts_count: int, dead_threshold_days: int = 365
+) -> Tuple[bool, int]:
+    """
+    Check if account is dead using v1/feed/user items.
+
+    Returns:
+        Tuple[bool, int]: (is_dead, last_post_days)
+    """
+    if not items:
+        return (posts_count > 0, 9999)
+
+    now = time.time()
+    times = [it.get("taken_at", 0) for it in items if it.get("taken_at", 0) > 0]
+    if not times:
+        return True, 9999
+
+    newest_days = int(min((now - t) / 86400 for t in times))
+    return newest_days > dead_threshold_days, newest_days
 
 
 # ── Tagged Tab parser ────────────────────────────────────────────────────────

@@ -79,10 +79,9 @@ from .models import (
 )
 from .parser import (
     check_dead_account,
-    extract_page_info,
+    check_dead_account_from_items,
     parse_comments,
-    parse_feed_tags,
-    parse_feed_tags_from_edges,
+    parse_feed_items,
     parse_post_html,
     parse_profile,
     parse_reels_edges,
@@ -120,6 +119,12 @@ class BatchScrapeInput(BaseModel):
         description="Parallel workers (1-20). Higher = faster but more rate-limit risk.",
         ge=1,
         le=20,
+    )
+    max_posts_per_profile: int = Field(
+        default=50,
+        description="Maximum posts to fetch per profile (1-500). Higher = richer data but slower.",
+        ge=1,
+        le=500,
     )
     use_cookies: bool = Field(
         default=False,
@@ -169,7 +174,6 @@ def _exception_to_tool_error(e: Exception) -> ToolError:
 async def _paginate_feed(
     client: InstagramClient,
     config: "MCPConfig",
-    user: dict,
     profile,
     max_posts: int,
     max_age_days: int,
@@ -177,48 +181,29 @@ async def _paginate_feed(
     ctx: Context,
 ) -> tuple:
     """
-    Fetch paginated feed edges. Returns (all_edges, pages_fetched, has_more, effective_max).
-    First 12 posts come from user dict (already fetched). Remainder via GraphQL cursor.
+    Fetch feed items via v1/feed/user with max_id pagination.
+    Reports per-page progress to ctx. Returns (items, effective_max).
     """
-    page_info = extract_page_info(user)
-    first_edges = page_info.get("first_page_edges", [])
-    end_cursor = page_info.get("end_cursor", "")
-    has_next = page_info.get("has_next_page", False)
-
-    all_edges = list(first_edges)
-    pages_fetched = 1
-    has_more = has_next
-
     effective_max = min(max_posts, config.max_pagination_posts)
-    remaining = effective_max - len(all_edges)
+    since_ts = date_range.since if date_range else None
 
-    await ctx.report_progress(len(all_edges), float(effective_max), message=f"{len(all_edges)}/{effective_max} posts fetched")
+    await ctx.report_progress(0.0, float(effective_max), message=f"Starting: up to {effective_max} posts...")
 
-    if remaining > 0 and has_next and end_cursor:
-        await ctx.info(f"Paginating: {len(all_edges)} posts so far, fetching up to {remaining} more...")
-        feed_result = await client.fetch_user_feed(
-            user_id=profile.user_id,
-            username=profile.username,
-            end_cursor=end_cursor,
-            max_posts=remaining,
-            max_age_days=max_age_days,
-            cache_ttl=config.cache_feed_ttl,
-            date_range=date_range,
-        )
-        new_edges = feed_result.get("edges", [])
-        all_edges.extend(new_edges)
-        pages_fetched += feed_result.get("pages_fetched", 0)
-        has_more = feed_result.get("has_more", False)
-        if not new_edges and remaining > 0:
-            await ctx.warning(
-                f"Pagination returned 0 posts (cursor may be incompatible). "
-                f"Got {len(all_edges)} total (first page only)."
-            )
-    elif remaining > 0 and not end_cursor:
-        await ctx.info(f"No pagination cursor — profile returned {len(all_edges)} posts only.")
+    async def _on_page(page_num: int, fetched: int, target: int) -> None:
+        pct = min(fetched / target * 100, 100) if target else 0
+        msg = f"Page {page_num}: {fetched}/{target} posts ({pct:.0f}%)"
+        await ctx.report_progress(float(fetched), float(effective_max), message=msg)
+        if page_num > 1:
+            await ctx.debug(f"Feed page {page_num} fetched — {fetched} posts so far")
 
-    await ctx.report_progress(float(len(all_edges)), float(effective_max), message=f"Done: {len(all_edges)} posts")
-    return all_edges, pages_fetched, has_more, effective_max
+    items = await client.fetch_feed_items(
+        user_id=profile.user_id,
+        max_posts=effective_max,
+        since_timestamp=since_ts,
+        page_cb=_on_page,
+    )
+    await ctx.report_progress(float(len(items)), float(effective_max), message=f"Done: {len(items)} posts fetched")
+    return items, effective_max
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -334,10 +319,19 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
 
                 feed_tags_result = FeedTagResult()
                 if not profile.is_private:
-                    await ctx.info(f"@{params.username}: parsing {params.max_feed_posts} posts...")
-                    feed_tags_result = parse_feed_tags(
-                        user, params.max_feed_posts, params.max_age_days, date_range=date_range,
+                    await ctx.info(f"@{params.username}: fetching {params.max_feed_posts} posts...")
+                    feed_items = await client.fetch_feed_items(
+                        profile.user_id, params.max_feed_posts,
+                        since_timestamp=_since,
                     )
+                    feed_tags_result = parse_feed_items(
+                        feed_items, params.max_feed_posts, params.max_age_days,
+                        since_timestamp=_since, until_timestamp=_until,
+                    )
+                    if params.check_alive:
+                        is_dead, last_post_days = check_dead_account_from_items(
+                            feed_items, profile.posts_count, params.dead_threshold_days
+                        )
 
                 out = format_profile_with_tags_markdown(profile, feed_tags_result, is_dead, last_post_days)
 
@@ -370,9 +364,9 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
 
         Paginated feed analysis — fetches up to 200 posts across multiple API pages.
 
-        The first 12 posts come from the profile request at no extra cost. Each
-        additional page of 12 posts requires one GraphQL cursor request. Example:
-        100 posts ≈ 9 requests. Progress is reported via MCP progress notifications.
+        The first 12 posts come from the profile request at no extra cost.
+        Additional posts are fetched via v1/feed/user (50 posts per page):
+        100 posts ≈ 2 extra requests. Progress is reported via MCP progress notifications.
 
         DATE-RANGE SCRAPING (smart pagination):
         Pass `since_date`/`until_date` (e.g. '01.03.2026' / '31.03.2026') to
@@ -426,18 +420,17 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
             if profile.is_private:
                 return format_deep_feed_markdown(profile, FeedTagResult(), False, 0)
 
-            all_edges, pages_fetched, has_more, effective_max = await _paginate_feed(
-                client, config, user, profile,
+            items, effective_max = await _paginate_feed(
+                client, config, profile,
                 params.max_posts, params.max_age_days, date_range, ctx,
             )
 
-            feed_tags = parse_feed_tags_from_edges(
-                edges=all_edges, max_posts=effective_max,
-                max_age_days=params.max_age_days, detect_pinned=True,
-                pages_fetched=pages_fetched, has_more_posts=has_more,
-                date_range=date_range,
+            feed_tags = parse_feed_items(
+                items, effective_max, params.max_age_days,
+                since_timestamp=date_range.since if date_range else None,
+                until_timestamp=date_range.until if date_range else None,
             )
-            is_dead, last_post_days = check_dead_account(user)
+            is_dead, last_post_days = check_dead_account_from_items(items, profile.posts_count)
 
             out = format_deep_feed_markdown(profile, feed_tags, is_dead, last_post_days)
             if params.include_posts_detail and feed_tags.posts:
@@ -451,7 +444,7 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
         elapsed = time.perf_counter() - _t0
         await ctx.info(
             f"@{params.username} ✓ — {feed_tags.posts_checked} posts, "
-            f"{pages_fetched} pages, {len(feed_tags.tags)} tags — {elapsed:.2f}s"
+            f"{len(feed_tags.tags)} tags — {elapsed:.2f}s"
         )
         return out
 
@@ -490,14 +483,16 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
 
         Args:
             params: username, max_posts (1-200, default 50), max_age_days (1-365,
-                    default 90)
+                    default 90), since_date / until_date (DD.MM.YYYY) to restrict
+                    the analysis to a specific time window
         """
         try:
             params.username = sanitize_username(params.username)
         except ValueError as e:
             raise _tool_error(str(e), "validation_error", "Provide a valid Instagram username.")
 
-        await ctx.info(f"instagram_analyze_engagement: @{params.username} ({params.max_posts} posts, {params.max_age_days}d)")
+        _date_suffix = f" [{params.since_date}→{params.until_date}]" if (params.since_date or params.until_date) else ""
+        await ctx.info(f"instagram_analyze_engagement: @{params.username} ({params.max_posts} posts, {params.max_age_days}d{_date_suffix})")
         _t0 = time.perf_counter()
 
         try:
@@ -518,15 +513,19 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
                     "Only public accounts can be analysed for engagement.",
                 )
 
-            all_edges, pages_fetched, _, effective_max = await _paginate_feed(
-                client, config, user, profile,
-                params.max_posts, params.max_age_days, None, ctx,
+            _since = params.resolved_since()
+            _until = params.resolved_until()
+            date_range = DateRange(since=_since, until=_until) if (_since or _until) else None
+
+            items, effective_max = await _paginate_feed(
+                client, config, profile,
+                params.max_posts, params.max_age_days, date_range, ctx,
             )
 
-            feed_tags = parse_feed_tags_from_edges(
-                edges=all_edges, max_posts=effective_max,
-                max_age_days=params.max_age_days, detect_pinned=True,
-                pages_fetched=pages_fetched,
+            feed_tags = parse_feed_items(
+                items, effective_max, params.max_age_days,
+                since_timestamp=date_range.since if date_range else None,
+                until_timestamp=date_range.until if date_range else None,
             )
 
             out = format_engagement_analysis_markdown(profile, feed_tags.posts)
@@ -537,7 +536,7 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
             raise _exception_to_tool_error(e)
 
         elapsed = time.perf_counter() - _t0
-        await ctx.info(f"@{params.username} ✓ — {len(feed_tags.posts)} posts, {pages_fetched} pages — {elapsed:.2f}s")
+        await ctx.info(f"@{params.username} ✓ — {len(feed_tags.posts)} posts — {elapsed:.2f}s")
         return out
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -575,14 +574,16 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
 
         Args:
             params: username, max_posts (1-200, default 50), max_age_days (1-365,
-                    default 90), min_frequency (1-50, default 1)
+                    default 90), min_frequency (1-50, default 1),
+                    since_date / until_date (DD.MM.YYYY) to restrict to a time window
         """
         try:
             params.username = sanitize_username(params.username)
         except ValueError as e:
             raise _tool_error(str(e), "validation_error", "Provide a valid Instagram username.")
 
-        await ctx.info(f"instagram_find_collab_network: @{params.username} ({params.max_posts} posts)")
+        _date_suffix = f" [{params.since_date}→{params.until_date}]" if (params.since_date or params.until_date) else ""
+        await ctx.info(f"instagram_find_collab_network: @{params.username} ({params.max_posts} posts{_date_suffix})")
         _t0 = time.perf_counter()
 
         try:
@@ -603,15 +604,19 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
                     "Only public accounts can be analysed.",
                 )
 
-            all_edges, pages_fetched, _, effective_max = await _paginate_feed(
-                client, config, user, profile,
-                params.max_posts, params.max_age_days, None, ctx,
+            _since = params.resolved_since()
+            _until = params.resolved_until()
+            date_range = DateRange(since=_since, until=_until) if (_since or _until) else None
+
+            items, effective_max = await _paginate_feed(
+                client, config, profile,
+                params.max_posts, params.max_age_days, date_range, ctx,
             )
 
-            feed_tags = parse_feed_tags_from_edges(
-                edges=all_edges, max_posts=effective_max,
-                max_age_days=params.max_age_days, detect_pinned=True,
-                pages_fetched=pages_fetched,
+            feed_tags = parse_feed_items(
+                items, effective_max, params.max_age_days,
+                since_timestamp=date_range.since if date_range else None,
+                until_timestamp=date_range.until if date_range else None,
             )
 
             out = format_collab_network_markdown(profile, feed_tags.posts, params.min_frequency)
@@ -622,7 +627,7 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
             raise _exception_to_tool_error(e)
 
         elapsed = time.perf_counter() - _t0
-        await ctx.info(f"@{params.username} ✓ — {len(feed_tags.posts)} posts, {pages_fetched} pages — {elapsed:.2f}s")
+        await ctx.info(f"@{params.username} ✓ — {len(feed_tags.posts)} posts — {elapsed:.2f}s")
         return out
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -803,14 +808,18 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
         analysed. Results are saved to output_file as JSON; if no path is given,
         a temporary file is used and its path is returned.
 
+        ⚠️  LIMIT: max 500 targets per call.
+        For 1000+ profiles, split into multiple calls (e.g. first 500 then second 500)
+        and provide the same output_file to accumulate results via resume support.
+
         Returns a summary table: total targets, completed count, and a breakdown
         by status (active / not_found / private / dead / error) with
         throughput (profiles/second) and total elapsed time.
 
         Args:
-            params: targets (list, max 500), since_date (DD.MM.YYYY),
-                    until_date (DD.MM.YYYY), max_workers (1-20),
-                    use_cookies, output_file
+            params: targets (list, max 500), max_posts_per_profile (1-500, default 50),
+                    since_date (DD.MM.YYYY), until_date (DD.MM.YYYY),
+                    max_workers (1-20), use_cookies, output_file
         """
         import os as _os
 
@@ -861,16 +870,21 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
         targets_tmp.close()
 
         try:
+            async def _batch_progress(completed: int, total: int, msg: str) -> None:
+                await ctx.info(msg)
+                await ctx.report_progress(float(completed), float(total), message=msg)
+
             batch_cfg = BatchConfig(
                 targets_file=targets_tmp.name,
                 output_file=output_file,
                 max_workers=params.max_workers,
+                max_posts=params.max_posts_per_profile,
                 since_date=params.since_date,
                 until_date=params.until_date,
                 use_cookies=params.use_cookies,
                 save_every=max(10, len(sanitized) // 10) if len(sanitized) >= 10 else len(sanitized),
             )
-            runner = BatchRunner(batch_cfg, client)
+            runner = BatchRunner(batch_cfg, client, progress_cb=_batch_progress)
 
             try:
                 stats = await runner.run()

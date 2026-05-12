@@ -168,62 +168,62 @@ async def test_scrape_one_not_found():
 
 @pytest.mark.asyncio
 @patch("instagram_mcp.batch_runner.parse_profile")
-@patch("instagram_mcp.batch_runner.parse_feed_tags")
 @patch("instagram_mcp.batch_runner.format_profile_json")
 @patch("instagram_mcp.batch_runner.format_feed_tags_json")
-async def test_scrape_one_success_private(mock_fmt_feed, mock_fmt_prof, mock_parse_feed, mock_parse_prof):
+async def test_scrape_one_success_private(mock_fmt_feed, mock_fmt_prof, mock_parse_prof):
     cfg = BatchConfig(targets_file="t.txt", output_file="o.json")
     client = AsyncMock()
     client.fetch_user.return_value = {"data": "some"}
-    
+
     runner = BatchRunner(cfg, client)
     prof_mock = MagicMock()
     prof_mock.is_private = True
     mock_parse_prof.return_value = prof_mock
-    
+
     res = await runner._scrape_one("user1", asyncio.Semaphore(1))
     assert res["status"] == "private"
 
 @pytest.mark.asyncio
 @patch("instagram_mcp.batch_runner.parse_profile")
-@patch("instagram_mcp.batch_runner.parse_feed_tags")
-@patch("instagram_mcp.batch_runner.check_dead_account")
+@patch("instagram_mcp.batch_runner.parse_feed_items")
+@patch("instagram_mcp.batch_runner.check_dead_account_from_items")
 @patch("instagram_mcp.batch_runner.format_profile_json")
 @patch("instagram_mcp.batch_runner.format_feed_tags_json")
 async def test_scrape_one_success_active(mock_fmt_feed, mock_fmt_prof, mock_check_dead, mock_parse_feed, mock_parse_prof):
     cfg = BatchConfig(targets_file="t.txt", output_file="o.json", max_posts=10)
     client = AsyncMock()
     client.fetch_user.return_value = {"data": "some"}
-    
+    client.fetch_feed_items.return_value = []
+
     runner = BatchRunner(cfg, client)
     prof_mock = MagicMock()
     prof_mock.is_private = False
     mock_parse_prof.return_value = prof_mock
     mock_check_dead.return_value = (False, 1)
-    
+    mock_parse_feed.return_value = FeedTagResult()
+
     res = await runner._scrape_one("user1", asyncio.Semaphore(1))
     assert res["status"] == "active"
 
 @pytest.mark.asyncio
 @patch("instagram_mcp.batch_runner.parse_profile")
-@patch("instagram_mcp.batch_runner.check_dead_account")
-@patch("instagram_mcp.batch_runner.extract_page_info")
-@patch("instagram_mcp.batch_runner.parse_feed_tags_from_edges")
+@patch("instagram_mcp.batch_runner.parse_feed_items")
+@patch("instagram_mcp.batch_runner.check_dead_account_from_items")
 @patch("instagram_mcp.batch_runner.format_profile_json")
 @patch("instagram_mcp.batch_runner.format_feed_tags_json")
-async def test_scrape_one_success_dead_paginated(mock_fmt_feed, mock_fmt_prof, mock_parse_edges, mock_extract_page, mock_check_dead, mock_parse_prof):
+async def test_scrape_one_success_dead_paginated(mock_fmt_feed, mock_fmt_prof, mock_check_dead, mock_parse_feed, mock_parse_prof):
     cfg = BatchConfig(targets_file="t.txt", output_file="o.json", max_posts=20, since_date="01.01.2023", until_date="31.12.2023")
     client = AsyncMock()
     client.fetch_user.return_value = {"data": "some"}
-    client.fetch_user_feed.return_value = {"edges": [2], "pages_fetched": 1, "has_more": False}
-    
+    client.fetch_feed_items.return_value = [{"taken_at": 1672531200}]
+
     runner = BatchRunner(cfg, client)
     prof_mock = MagicMock()
     prof_mock.is_private = False
     mock_parse_prof.return_value = prof_mock
     mock_check_dead.return_value = (True, 100)
-    mock_extract_page.return_value = {"first_page_edges": [1], "end_cursor": "cursor", "has_next_page": True}
-    
+    mock_parse_feed.return_value = FeedTagResult()
+
     res = await runner._scrape_one("user1", asyncio.Semaphore(1))
     assert res["status"] == "dead"
 

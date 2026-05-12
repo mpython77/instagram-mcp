@@ -26,12 +26,10 @@ from typing import Any, Dict, List, Optional, Set
 
 from .config import MCPConfig
 from .formatter import format_feed_tags_json, format_profile_json
-from .models import DateRange, FeedTagResult
+from .models import FeedTagResult
 from .parser import (
-    check_dead_account,
-    extract_page_info,
-    parse_feed_tags,
-    parse_feed_tags_from_edges,
+    check_dead_account_from_items,
+    parse_feed_items,
     parse_profile,
 )
 
@@ -123,17 +121,45 @@ class BatchRunner:
         config = BatchConfig(targets_file="users.txt", output_file="results.json")
         runner = BatchRunner(config, instagram_client)
         stats = await runner.run()
+
+    progress_cb: optional async callable(completed, total, message) — called
+                 after each periodic save so MCP tools can forward updates to the AI.
     """
 
-    def __init__(self, config: BatchConfig, instagram_client: Any) -> None:
+    def __init__(self, config: BatchConfig, instagram_client: Any, progress_cb=None) -> None:
         self._config = config
         self._client = instagram_client
+        self._progress_cb = progress_cb
         self._stats = BatchStats()
         self._results: Dict[str, Any] = {}        # username → result dict
         self._completed: Set[str] = set()         # already-done usernames (lowercase)
         self._stop_flag = False
         self._lock = asyncio.Lock()
         self._started_at: str = ""
+
+    # ── Progress reporting ───────────────────────────────────────────────────
+
+    async def _emit_progress(self, prefix: str = "") -> None:
+        """Send a structured progress update to the MCP context (if set)."""
+        if self._progress_cb is None:
+            return
+        s = self._stats
+        pct = s.completed / s.total * 100 if s.total else 0
+        remaining = s.total - s.completed
+        eta = f"{remaining / s.rate:.0f}s" if s.rate > 0 else "?"
+        msg = (
+            f"{prefix}[{s.completed}/{s.total}] {pct:.0f}% | "
+            f"✅ {s.active} active  💀 {s.dead} dead  "
+            f"🔒 {s.private} private  ❌ {s.not_found} not_found  "
+            f"⚠️ {s.error} error  | "
+            f"{s.rate:.1f} profiles/s  ETA {eta}"
+        )
+        try:
+            coro = self._progress_cb(s.completed, s.total, msg)
+            if asyncio.iscoroutine(coro):
+                await coro
+        except Exception as exc:
+            logger.debug("progress_cb failed: %s", exc)
 
     # ── Public entry point ───────────────────────────────────────────────────
 
@@ -178,6 +204,19 @@ class BatchRunner:
 
         start_time = time.monotonic()
         semaphore = asyncio.Semaphore(cfg.max_workers)
+
+        # Emit start notification
+        if self._progress_cb is not None:
+            start_msg = (
+                f"🚀 Batch started — {len(pending)} profiles to scrape "
+                f"({len(self._completed)} already done), {cfg.max_workers} workers"
+            )
+            try:
+                coro = self._progress_cb(self._stats.completed, self._stats.total, start_msg)
+                if asyncio.iscoroutine(coro):
+                    await coro
+            except Exception:
+                pass
 
         tasks = [
             asyncio.create_task(self._scrape_one(username, semaphore))
@@ -238,10 +277,12 @@ class BatchRunner:
                     self._stats.error,
                     self._stats.rate,
                 )
+                await self._emit_progress()
 
         # Final save
         self._stats.elapsed_seconds = time.monotonic() - start_time
         self._save_progress()
+        await self._emit_progress(prefix="✅ Done! ")
 
         logger.info(
             "Batch done | completed=%d active=%d not_found=%d dead=%d error=%d | %.1f/s | %.1fs",
@@ -422,54 +463,21 @@ class BatchRunner:
                 feed_tags_result = FeedTagResult()
 
                 if not profile.is_private:
-                    _date_range = DateRange(
-                        since=cfg.since_timestamp,
-                        until=cfg.until_timestamp,
-                    ) if (cfg.since_timestamp or cfg.until_timestamp) else None
-
-                    if cfg.max_posts <= 12:
-                        # First page only — no extra requests needed
-                        feed_tags_result = parse_feed_tags(
-                            user,
-                            cfg.max_posts,
-                            cfg.max_age_days,
-                            date_range=_date_range,
-                        )
-                    else:
-                        # Paginate to collect up to max_posts across multiple pages
-                        page_info = extract_page_info(user)
-                        first_edges = page_info.get("first_page_edges", [])
-                        end_cursor = page_info.get("end_cursor", "")
-                        has_next = page_info.get("has_next_page", False)
-                        all_edges = list(first_edges)
-                        pages_fetched = 1
-                        has_more = has_next
-
-                        remaining = cfg.max_posts - len(all_edges)
-                        if remaining > 0 and has_next and end_cursor:
-                            feed_result = await self._client.fetch_user_feed(
-                                user_id=profile.user_id,
-                                username=username,
-                                end_cursor=end_cursor,
-                                max_posts=remaining,
-                                max_age_days=cfg.max_age_days,
-                                date_range=_date_range,
-                            )
-                            all_edges.extend(feed_result.get("edges", []))
-                            pages_fetched += feed_result.get("pages_fetched", 0)
-                            has_more = feed_result.get("has_more", False)
-
-                        feed_tags_result = parse_feed_tags_from_edges(
-                            edges=all_edges,
-                            max_posts=cfg.max_posts,
-                            max_age_days=cfg.max_age_days,
-                            detect_pinned=True,
-                            pages_fetched=pages_fetched,
-                            has_more_posts=has_more,
-                            date_range=_date_range,
-                        )
-
-                    is_dead, last_post_days = check_dead_account(user)
+                    feed_items = await self._client.fetch_feed_items(
+                        user_id=profile.user_id,
+                        max_posts=cfg.max_posts,
+                        since_timestamp=cfg.since_timestamp,
+                    )
+                    feed_tags_result = parse_feed_items(
+                        feed_items,
+                        max_posts=cfg.max_posts,
+                        max_age_days=cfg.max_age_days,
+                        since_timestamp=cfg.since_timestamp,
+                        until_timestamp=cfg.until_timestamp,
+                    )
+                    is_dead, last_post_days = check_dead_account_from_items(
+                        feed_items, profile.posts_count
+                    )
 
                 # Determine status
                 if profile.is_private:

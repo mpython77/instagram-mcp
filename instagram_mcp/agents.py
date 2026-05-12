@@ -38,9 +38,8 @@ from .config import MCPConfig
 from .models import DateRange, FeedTagResult, InstagramPost, InstagramProfile
 from .parser import (
     check_dead_account,
-    extract_page_info,
-    parse_feed_tags,
-    parse_feed_tags_from_edges,
+    check_dead_account_from_items,
+    parse_feed_items,
     parse_profile,
 )
 
@@ -214,35 +213,20 @@ class _BaseAgent:
 
     async def _paginate(
         self,
-        user: dict,
         profile: InstagramProfile,
         max_posts: int,
         max_age_days: int,
         date_range: Optional["DateRange"] = None,
     ) -> Tuple[List[dict], int]:
-        """Return (all_edges, pages_fetched)."""
-        page_info = extract_page_info(user)
-        all_edges = list(page_info.get("first_page_edges", []))
-        end_cursor = page_info.get("end_cursor", "")
-        has_next = page_info.get("has_next_page", False)
+        """Fetch feed items via v1/feed/user. Returns (items, effective_max)."""
         effective = min(max_posts, self.config.max_pagination_posts)
-        pages = 1
-
-        remaining = effective - len(all_edges)
-        if remaining > 0 and has_next and end_cursor and profile.user_id:
-            feed = await self.client.fetch_user_feed(
-                user_id=profile.user_id,
-                username=profile.username,
-                end_cursor=end_cursor,
-                max_posts=remaining,
-                max_age_days=max_age_days,
-                cache_ttl=self.config.cache_feed_ttl,
-                date_range=date_range,
-            )
-            all_edges.extend(feed.get("edges", []))
-            pages += feed.get("pages_fetched", 0)
-
-        return all_edges[:effective], pages
+        since_ts = date_range.since if date_range else None
+        items = await self.client.fetch_feed_items(
+            user_id=profile.user_id,
+            max_posts=effective,
+            since_timestamp=since_ts,
+        )
+        return items, effective
 
     @staticmethod
     async def _emit(cb: ProgressCB, current: int, total: int, msg: str) -> None:
@@ -316,21 +300,16 @@ class InfluencerVettingAgent(_BaseAgent):
             result.elapsed_s = round(time.perf_counter() - t0, 2)
             return result
 
-        is_dead, last_post_days = check_dead_account(user)
-        result.is_dead = is_dead
-        result.last_post_days = last_post_days
-
-        feed_tags = parse_feed_tags(user, 12, max_age_days)
-        result.feed_tags = feed_tags
-
         # ── Step 2: Engagement (paginated) ────────────────────────────────────
         await self._emit(progress_cb, 2, 4, f"Analysing engagement ({max_posts} posts)...")
+        posts: list = []
         try:
-            all_edges, _ = await self._paginate(user, profile, max_posts, max_age_days)
-            ft = parse_feed_tags_from_edges(
-                edges=all_edges, max_posts=max_posts,
-                max_age_days=max_age_days, detect_pinned=True,
-            )
+            items, effective_max = await self._paginate(profile, max_posts, max_age_days)
+            is_dead, last_post_days = check_dead_account_from_items(items, profile.posts_count)
+            result.is_dead = is_dead
+            result.last_post_days = last_post_days
+            ft = parse_feed_items(items, effective_max, max_age_days)
+            result.feed_tags = ft
             posts = ft.posts
             result.posts_analysed = len(posts)
             result.er_pct = compute_er(profile, posts)
@@ -339,7 +318,6 @@ class InfluencerVettingAgent(_BaseAgent):
                 result.avg_comments = round(sum(p.comments for p in posts) / len(posts), 1)
         except Exception as e:
             result.errors.append(f"Engagement analysis failed: {e}")
-            posts = feed_tags.posts
 
         # ── Step 3: Collab network ────────────────────────────────────────────
         await self._emit(progress_cb, 3, 4, "Mapping collaboration network...")
@@ -447,18 +425,15 @@ class AccountHealthAgent(_BaseAgent):
             report.elapsed_s = round(time.perf_counter() - t0, 2)
             return report
 
-        is_dead, last_post_days = check_dead_account(user, dead_threshold_days)
-        report.last_post_days = last_post_days
-        report.status = "dead" if is_dead else "active"
-
         # ── Step 2: Engagement ────────────────────────────────────────────────
         await self._emit(progress_cb, 2, 3, "Analysing engagement...")
+        is_dead, last_post_days = False, 0
         try:
-            all_edges, _ = await self._paginate(user, profile, max_posts, max_age_days)
-            ft = parse_feed_tags_from_edges(
-                edges=all_edges, max_posts=max_posts,
-                max_age_days=max_age_days, detect_pinned=True,
+            items, effective_max = await self._paginate(profile, max_posts, max_age_days)
+            is_dead, last_post_days = check_dead_account_from_items(
+                items, profile.posts_count, dead_threshold_days
             )
+            ft = parse_feed_items(items, effective_max, max_age_days)
             posts = ft.posts
             report.posts_analysed = len(posts)
             report.er_pct = compute_er(profile, posts)
@@ -466,6 +441,9 @@ class AccountHealthAgent(_BaseAgent):
                 report.avg_likes = round(sum(p.likes for p in posts) / len(posts), 1)
         except Exception as e:
             report.errors.append(f"Engagement analysis failed: {e}")
+
+        report.last_post_days = last_post_days
+        report.status = "dead" if is_dead else "active"
 
         # ── Step 3: Flags + verdict ───────────────────────────────────────────
         await self._emit(progress_cb, 3, 3, "Evaluating health...")
@@ -578,11 +556,8 @@ class CreatorDiscoveryAgent(_BaseAgent):
         if profile.is_private:
             return []
 
-        all_edges, _ = await self._paginate(user, profile, max_posts, max_age_days)
-        ft = parse_feed_tags_from_edges(
-            edges=all_edges, max_posts=max_posts,
-            max_age_days=max_age_days, detect_pinned=True,
-        )
+        items, effective_max = await self._paginate(profile, max_posts, max_age_days)
+        ft = parse_feed_items(items, effective_max, max_age_days)
 
         # Collect candidates with source type and frequency.
         # Priority order (strongest signal wins): sponsor > coauthor > usertag > mention.
@@ -753,16 +728,10 @@ class BulkScoringAgent(_BaseAgent):
 
                 async def _enrich(acc: ScoredAccount) -> None:
                     try:
-                        user_data = await self._fetch(acc.username)
-                        if user_data is None or acc.profile is None:
+                        if acc.profile is None:
                             return
-                        all_edges, _ = await self._paginate(
-                            user_data, acc.profile, 50, max_age_days
-                        )
-                        ft = parse_feed_tags_from_edges(
-                            edges=all_edges, max_posts=50,
-                            max_age_days=max_age_days, detect_pinned=True,
-                        )
+                        items, effective_max = await self._paginate(acc.profile, 50, max_age_days)
+                        ft = parse_feed_items(items, effective_max, max_age_days)
                         acc.er_pct = compute_er(acc.profile, ft.posts)
                         acc.score = compute_account_score(acc.profile, acc.er_pct, acc.last_post_days)
                     except Exception as e:
@@ -859,16 +828,11 @@ class ContentAuditAgent(_BaseAgent):
             return report
 
         await self._emit(progress_cb, 1, 3, "Paginating feed…")
-        edges, _ = await self._paginate(user, profile, max_posts, max_age_days)
+        items, effective_max = await self._paginate(profile, max_posts, max_age_days)
 
-        from .parser import parse_feed_tags_from_edges
         from datetime import datetime, timezone
 
-        feed = parse_feed_tags_from_edges(
-            edges=edges,
-            max_posts=max_posts,
-            max_age_days=max_age_days,
-        )
+        feed = parse_feed_items(items, effective_max, max_age_days)
         posts = feed.posts
         report.posts_analyzed = len(posts)
 

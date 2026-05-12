@@ -96,6 +96,9 @@ class MCPConfig:
     default_max_age_days: int = 4
     dead_threshold_days: int = 365
 
+    # ── Feed Pagination (v1/feed/user) ───────────────────────────────────────
+    ig_feed_endpoint: str = "https://i.instagram.com/api/v1/feed/user/{}/"
+
     # ── Feed Pagination (GraphQL) ────────────────────────────────────────────
     ig_graphql_endpoint: str = "https://www.instagram.com/graphql/query/"
     ig_graphql_doc_id: str = "26442143102071041"  # PolarisProfilePostsTabContentQuery_connection

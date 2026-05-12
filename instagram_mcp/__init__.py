@@ -9,7 +9,7 @@ Architecture:
   - TTL cache (LRU eviction) with background cleanup
   - Adaptive rate limiter (token-bucket + circuit breaker)
   - Session pooling (thread-safe, curl_cffi)
-  - Full pagination (up to 200 posts via GraphQL cursor)
+  - Full pagination (up to 200 posts via v1/feed/user + max_id)
   - Context-aware tools: MCP-native progress reporting + logging
 
 Transports supported:
@@ -631,7 +631,13 @@ def run_server() -> None:
            optionally set INSTAGRAM_MCP_HOST and INSTAGRAM_MCP_PORT
     """
     import os
+    import sys
     import logging as _logging
+
+    # curl_cffi AsyncSession requires SelectorEventLoop on Windows;
+    # ProactorEventLoop (the default since Python 3.8) is incompatible.
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     _logging.basicConfig(
         level=_logging.INFO,

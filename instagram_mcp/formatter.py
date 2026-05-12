@@ -250,9 +250,10 @@ def format_posts_markdown(posts: List[InstagramPost]) -> str:
         type_label = p.post_type.upper() if p.post_type else "POST"
         if p.carousel_count > 1:
             type_label += f" ×{p.carousel_count}"
+        pin_badge = " 📌 **PINNED**" if p.is_pinned else ""
         lines.append("---")
         lines.append(
-            f"**{icon} [{p.shortcode}]({p.post_url})** `{type_label}` — "
+            f"**{icon} [{p.shortcode}]({p.post_url})** `{type_label}`{pin_badge} — "
             f"`{p.taken_at_str}` ({p.age_days}d ago)"
         )
 
@@ -541,9 +542,11 @@ def format_deep_feed_markdown(
     sections.append("")
     sections.append("### 📊 Feed Analysis Summary")
     sections.append("")
+    pinned_count = sum(1 for p in feed_result.posts if p.is_pinned)
     stats_lines = [
         f"- **Posts analyzed**: {feed_result.posts_checked}",
         f"- **Pages fetched**: {feed_result.pages_fetched}",
+        f"- **Pinned posts**: {pinned_count} 📌" if pinned_count else f"- **Pinned posts**: 0",
         f"- **Posts with tags**: {feed_result.posts_with_tags}",
         f"- **Unique tags found**: {len(feed_result.tags)}",
     ]

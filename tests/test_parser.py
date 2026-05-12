@@ -1,5 +1,4 @@
 """
-
 Comprehensive pytest tests for instagram_mcp/parser.py.
 Goal: 100% line and branch coverage.
 """
