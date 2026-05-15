@@ -59,6 +59,7 @@ def create_mcp_server():
     from .client import InstagramClient
     from .config import MCPConfig
     from .cookie_manager import CookieManager
+    from .exporter import JsonExporter
     from .proxy_manager import ProxyManager
     from .rate_limiter import AdaptiveRateLimiter
     from .tools import register_tools
@@ -75,7 +76,7 @@ def create_mcp_server():
     if cookie_manager.is_authenticated:
         logger.info("instagram_mcp: authenticated session loaded from cookies.txt")
     else:
-        logger.info("instagram_mcp: no cookies.txt — running in anonymous mode (10/13 tools available)")
+        logger.info("instagram_mcp: no cookies.txt — running in anonymous mode (10/14 tools available)")
 
     cache = SmartCache(
         max_entries=config.cache_max_entries,
@@ -100,7 +101,18 @@ def create_mcp_server():
         health_check_interval=config.proxy_health_interval,
     )
 
-    # ── 3. Central client ─────────────────────────────────────────────────────
+    # ── 3. JSON auto-exporter ─────────────────────────────────────────────────
+    exporter = JsonExporter.from_config(config)
+    if exporter.enabled:
+        logger.info(
+            "instagram_mcp: JSON auto-save enabled → %s (indent=%d)",
+            exporter.export_dir,
+            exporter.indent,
+        )
+    else:
+        logger.info("instagram_mcp: JSON auto-save disabled")
+
+    # ── 4. Central client ─────────────────────────────────────────────────────
     client = InstagramClient(
         config=config,
         proxy_manager=proxy_manager,
@@ -109,7 +121,7 @@ def create_mcp_server():
         cookie_manager=cookie_manager,
     )
 
-    # ── 4. Lifespan — all background tasks start inside the running event loop ─
+    # ── 5. Lifespan — all background tasks start inside the running event loop ─
     @contextlib.asynccontextmanager
     async def _lifespan(server):
         async def _cache_cleanup_loop():
@@ -159,10 +171,12 @@ def create_mcp_server():
         instructions=(
             f"Instagram data server — {_auth_status}.\n\n"
             "AUTH TIERS:\n"
-            "• 🌐 NO LOGIN REQUIRED — 10 anonymous tools, no credentials needed.\n"
-            "• 🔐 AUTH REQUIRED — 3 tools require cookies.json/cookies.txt with a valid "
-            "Instagram session. Each tool's docstring starts with its tier marker.\n\n"
-            "TOOLS (13 total):\n"
+            "• 🌐 NO LOGIN REQUIRED — 11 anonymous tools, no credentials needed.\n"
+            "• 🔐 AUTH REQUIRED — 8 tools require cookies.json/cookies.txt with a valid "
+            "Instagram session. Each tool's docstring starts with its tier marker.\n"
+            "• 🌐/🔐 AUTO-MODE — 1 tool (instagram_hashtag) works anonymously but upgrades "
+            "automatically to auth mode when cookies are present.\n\n"
+            "TOOLS (19 total):\n"
             "• 🌐 instagram_profile — profile metadata + optional feed tags (up to 12 posts) "
             "+ activity status. One API call covers profile, tags, mentions, dead-account check. "
             "Set include_feed=False for fastest profile-only lookup.\n"
@@ -180,6 +194,24 @@ def create_mcp_server():
             "• 🌐 instagram_post — full details for ONE post by shortcode or URL: "
             "location (name + GPS + Google Maps link), exact timestamp, caption, hashtags, "
             "usertags, music. Input: shortcode like 'DXjuqH9nDVE' or full post URL.\n"
+            "• 🌐/🔐 instagram_hashtag — trending/top posts for any hashtag. "
+            "AUTO-MODE: 🌐 anon gives 12 posts (no likes); 🔐 auth gives up to 300 posts "
+            "(paginated, 30/page) with full likes + plays + comments + music + tagged users. "
+            "Auth also unlocks age-gated hashtags (#swimwear, #bikini, #fitness …). "
+            "Input: tag (without #), max_posts (default 30, max 300).\n"
+            "• 🔐 instagram_search — find accounts and hashtags by keyword. "
+            "context='blended' (users+hashtags, default), 'user' (accounts only), 'hashtag' (hashtags only). "
+            "Returns: username, full name, verified, follower count, mutual follow status, "
+            "and for hashtags: post count. Auth required — returns 401 without cookies.\n"
+            "• 🔐 instagram_followers_list — recent followers of an account (~50, no pagination for others). "
+            "Returns: username, verified, private, mutual follow status. "
+            "Note: Instagram limits this to ~50 for accounts other than your own.\n"
+            "• 🔐 instagram_following_list — accounts a user follows, with full pagination (50/page). "
+            "max_users param controls total (default 200, max 1000). "
+            "Extra: is_favorite (⭐) field. Full mutual-follow detection.\n"
+            "• 🔐 instagram_post_likers — users who liked a post (~98 returned, no pagination). "
+            "Shows total like count. Full friendship_status per liker (following, followed_by, muting, blocking). "
+            "Input: shortcode or full post URL.\n"
             "• 🔐 instagram_tagged_by — posts BY OTHERS that tag this account (passive — "
             "they mentioned us). Tagged Tab endpoint.\n"
             "• 🔐 instagram_reposts — content this account ACTIVELY REPOSTED from others "
@@ -190,17 +222,24 @@ def create_mcp_server():
             "• 🌐 instagram_post_comments — comments on a single post with per-comment like counts, "
             "author info, threading depth, GIF detection, and language flags. "
             "Input: shortcode or URL. sort_order='popular' for most-liked first, 'recent' for chronological. "
-            "instagram_post returns comment COUNT only — use this tool for actual comment content.\n\n"
+            "instagram_post returns comment COUNT only — use this tool for actual comment content.\n"
+            "• 🔐 instagram_stories — fetch currently active Stories for an account. "
+            "Returns per story: media type (image/video), timestamp, expiry, duration, music, "
+            "mention stickers, linked post sticker, accessibility caption, paid partnership flag. "
+            "Stories expire after 24h — cached 2 min. Use for real-time brand monitoring.\n\n"
             "CONTENT-FROM-OTHERS DECISION GUIDE:\n"
             "  Who appears in account's OWN posts?    → instagram_find_collab_network 🌐\n"
             "  Who tagged the account in THEIR posts? → instagram_tagged_by 🔐\n"
-            "  What did the account REPOST from others? → instagram_reposts 🔐\n\n"
+            "  What did the account REPOST from others? → instagram_reposts 🔐\n"
+            "  What's trending by hashtag?             → instagram_hashtag 🌐/🔐\n"
+            "  Find an account by name/keyword?        → instagram_search 🔐\n"
+            "  Discover related hashtags for a topic?  → instagram_search context='hashtag' 🔐\n\n"
             "Results are cached — repeated lookups are instant."
         ),
     )
 
     # ── 6. Tools ──────────────────────────────────────────────────────────────
-    register_tools(mcp, client, config)
+    register_tools(mcp, client, config, exporter)
 
     # ── 7. Resources ──────────────────────────────────────────────────────────
     _register_resources(mcp, client, config)

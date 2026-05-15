@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import datetime as _dt
+from datetime import datetime as _dt, timezone as _tz
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .config import MCPConfig
@@ -778,7 +778,7 @@ def parse_tagged_tab_edges(
 
         taken_at = _pk_to_timestamp(pk)
         taken_at_str = (
-            _dt.utcfromtimestamp(taken_at).strftime("%Y-%m-%d %H:%M")
+            _dt.fromtimestamp(taken_at, tz=_tz.utc).strftime("%Y-%m-%d %H:%M")
             if taken_at
             else ""
         )
@@ -862,7 +862,7 @@ def parse_repost_items(
 
         taken_at = _pk_to_timestamp(pk)
         taken_at_str = (
-            _dt.utcfromtimestamp(taken_at).strftime("%Y-%m-%d")
+            _dt.fromtimestamp(taken_at, tz=_tz.utc).strftime("%Y-%m-%d")
             if taken_at
             else ""
         )
@@ -959,7 +959,7 @@ def parse_reels_edges(
         if not taken_at and pk:
             taken_at = _pk_to_timestamp(pk)
         taken_at_str = (
-            _dt.utcfromtimestamp(taken_at).strftime("%Y-%m-%d %H:%M")
+            _dt.fromtimestamp(taken_at, tz=_tz.utc).strftime("%Y-%m-%d %H:%M")
             if taken_at
             else ""
         )
@@ -1055,7 +1055,7 @@ def parse_comments(
             text=str(caption_raw.get("text") or ""),
             comment_index=-1,
             created_at=cap_ts,
-            created_at_str=_dt.utcfromtimestamp(cap_ts).strftime("%Y-%m-%d %H:%M") if cap_ts else "",
+            created_at_str=_dt.fromtimestamp(cap_ts, tz=_tz.utc).strftime("%Y-%m-%d %H:%M") if cap_ts else "",
             username=str(cap_user.get("username") or ""),
             user_id=str(cap_user.get("pk") or cap_user.get("id") or ""),
             full_name=str(cap_user.get("full_name") or ""),
@@ -1089,7 +1089,7 @@ def parse_comments(
             comment_like_count=int(raw.get("comment_like_count") or 0),
             child_comment_count=int(raw.get("child_comment_count") or 0),
             created_at=ts,
-            created_at_str=_dt.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M") if ts else "",
+            created_at_str=_dt.fromtimestamp(ts, tz=_tz.utc).strftime("%Y-%m-%d %H:%M") if ts else "",
             username=str(user.get("username") or ""),
             user_id=str(user.get("pk") or user.get("id") or ""),
             full_name=str(user.get("full_name") or ""),
@@ -1191,7 +1191,7 @@ def parse_post_html(html: str, shortcode: str) -> PostInfo:
         if _IG_TS_MIN <= ts <= _IG_TS_MAX:
             info.taken_at = ts
             info.taken_at_str = (
-                _dt.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M UTC")
+                _dt.fromtimestamp(ts, tz=_tz.utc).strftime("%Y-%m-%d %H:%M UTC")
             )
 
     # ── Author ────────────────────────────────────────────────────────────────

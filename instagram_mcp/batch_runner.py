@@ -225,59 +225,71 @@ class BatchRunner:
 
         done_since_save = 0
 
-        for coro in asyncio.as_completed(tasks):
-            if self._stop_flag:
-                # Cancel remaining tasks
-                for t in tasks:
-                    if not t.done():
-                        t.cancel()
-                break
+        try:
+            for coro in asyncio.as_completed(tasks):
+                if self._stop_flag:
+                    # Cancel remaining tasks
+                    for t in tasks:
+                        if not t.done():
+                            t.cancel()
+                    # Close the as_completed wrapper we pulled but won't await.
+                    coro.close()
+                    break
 
-            try:
-                result = await coro
-            except asyncio.CancelledError:
-                continue
-            except Exception as exc:
-                logger.error("Unexpected error from scrape task: %s", exc)
-                continue
-            username = result.get("username", "")
-            status = result.get("status", "error")
+                try:
+                    result = await coro
+                except asyncio.CancelledError:
+                    continue
+                except Exception as exc:
+                    logger.error("Unexpected error from scrape task: %s", exc)
+                    continue
+                username = result.get("username", "")
+                status = result.get("status", "error")
 
-            # Update stats
-            async with self._lock:
-                self._results[username] = result
-                self._completed.add(username.lower())
-                self._stats.completed += 1
-                done_since_save += 1
+                # Update stats
+                async with self._lock:
+                    self._results[username] = result
+                    self._completed.add(username.lower())
+                    self._stats.completed += 1
+                    done_since_save += 1
 
-                if status == "active":
-                    self._stats.active += 1
-                elif status == "not_found":
-                    self._stats.not_found += 1
-                elif status == "private":
-                    self._stats.private += 1
-                elif status == "dead":
-                    self._stats.dead += 1
-                else:
-                    self._stats.error += 1
+                    if status == "active":
+                        self._stats.active += 1
+                    elif status == "not_found":
+                        self._stats.not_found += 1
+                    elif status == "private":
+                        self._stats.private += 1
+                    elif status == "dead":
+                        self._stats.dead += 1
+                    else:
+                        self._stats.error += 1
 
-            # Periodic save + log
-            if done_since_save >= cfg.save_every:
-                elapsed = time.monotonic() - start_time
-                self._stats.elapsed_seconds = elapsed
-                self._save_progress()
-                done_since_save = 0
-                logger.info(
-                    "[%d/%d] saved | active=%d not_found=%d dead=%d error=%d | %.1f/s",
-                    self._stats.completed,
-                    self._stats.total,
-                    self._stats.active,
-                    self._stats.not_found,
-                    self._stats.dead,
-                    self._stats.error,
-                    self._stats.rate,
-                )
-                await self._emit_progress()
+                # Periodic save + log
+                if done_since_save >= cfg.save_every:
+                    elapsed = time.monotonic() - start_time
+                    self._stats.elapsed_seconds = elapsed
+                    self._save_progress()
+                    done_since_save = 0
+                    logger.info(
+                        "[%d/%d] saved | active=%d not_found=%d dead=%d error=%d | %.1f/s",
+                        self._stats.completed,
+                        self._stats.total,
+                        self._stats.active,
+                        self._stats.not_found,
+                        self._stats.dead,
+                        self._stats.error,
+                        self._stats.rate,
+                    )
+                    await self._emit_progress()
+        finally:
+            # Ensure any pending tasks are awaited so they don't leak as
+            # "never awaited" coroutines (matters when as_completed is mocked
+            # or when we break early via _stop_flag).
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
 
         # Final save
         self._stats.elapsed_seconds = time.monotonic() - start_time

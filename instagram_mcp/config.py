@@ -23,6 +23,9 @@ Environment variables:
     INSTAGRAM_MCP_CACHE_MAX        — Max cache entries (default: 500)
     INSTAGRAM_MCP_GRAPHQL_DOC_ID   — GraphQL doc_id for feed pagination
     INSTAGRAM_MCP_MAX_PAGINATION   — Max posts for pagination (default: 200)
+    INSTAGRAM_MCP_EXPORT_ENABLED   — '0' or 'false' disables JSON auto-save (default: enabled)
+    INSTAGRAM_MCP_EXPORT_DIR       — Directory for saved JSON files (default: ./exports)
+    INSTAGRAM_MCP_EXPORT_INDENT    — JSON indentation spaces, 0 = compact (default: 2)
 """
 
 from __future__ import annotations
@@ -113,6 +116,11 @@ class MCPConfig:
     cache_reels_ttl: int = 300        # 5 min — reels tab
     cache_comments_ttl: int = 60      # 1 min — comments change quickly
 
+    # ── JSON Auto-Export ─────────────────────────────────────────────────────
+    export_enabled: bool = True       # Write every tool result to JSON file
+    export_dir: str = "exports"       # Root output directory
+    export_indent: int = 2            # JSON pretty-print indent (0 = compact)
+
     # ── Authentication (cookies.txt) ─────────────────────────────────────────
     cookies_path: str = ""            # Override via INSTAGRAM_MCP_COOKIES env var
 
@@ -197,6 +205,14 @@ class MCPConfig:
         # Authentication
         if v := os.environ.get("INSTAGRAM_MCP_COOKIES"):
             cfg.cookies_path = v
+
+        # JSON auto-export
+        if os.environ.get("INSTAGRAM_MCP_EXPORT_ENABLED", "").lower() in ("0", "false"):
+            cfg.export_enabled = False
+        if v := os.environ.get("INSTAGRAM_MCP_EXPORT_DIR"):
+            cfg.export_dir = v
+        if v := os.environ.get("INSTAGRAM_MCP_EXPORT_INDENT"):
+            cfg.export_indent = int(v)
 
         return cfg
 

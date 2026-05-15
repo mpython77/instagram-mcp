@@ -1,9 +1,9 @@
 """
-MCP Tool registration — 13 tools, optimised for LLM agents.
+MCP Tool registration — 19 tools, optimised for LLM agents.
 
 AUTH TIERS:
   🌐 ANONYMOUS (10 tools) — no login, no cookies, fully public
-  🔐 AUTHENTICATED (3 tools) — requires cookies.txt with a valid Instagram session
+  🔐 AUTHENTICATED (8 tools) — requires cookies.txt with a valid Instagram session
 
 Tools:
   1. instagram_profile          — 🌐 Profile + optional feed tags + activity status
@@ -19,6 +19,7 @@ Tools:
  11. instagram_post              — 🌐 Full details for a single post by shortcode/URL
  12. instagram_reels             — 🔐 Account's own reels with play counts
  13. instagram_post_comments     — 🌐 Comments on a post with per-comment like counts
+ 14. instagram_stories           — 🔐 Active Stories with music, mentions, linked posts
 
 Architecture:
   - Every tool has ctx: Context → MCP-native progress + logging (all async)
@@ -43,14 +44,23 @@ from pydantic import BaseModel, Field
 from .client import InstagramClient
 from .config import MCPConfig
 from .exceptions import InstagramMCPError
+from .exporter import JsonExporter
 from .formatter import (
     format_account_status_markdown,
+    format_audio_reels_markdown,
     format_bulk_results_markdown,
     format_collab_network_markdown,
     format_compare_profiles_markdown,
     format_deep_feed_markdown,
     format_diagnostics_markdown,
     format_engagement_analysis_markdown,
+    format_followers_markdown,
+    format_following_markdown,
+    format_hashtag_markdown,
+    format_highlights_markdown,
+    format_location_posts_markdown,
+    format_post_likers_markdown,
+    format_search_markdown,
     format_post_markdown,
     format_posts_markdown,
     format_profile_markdown,
@@ -58,9 +68,11 @@ from .formatter import (
     format_comments_markdown,
     format_reels_markdown,
     format_reposts_markdown,
+    format_stories_markdown,
     format_tagged_by_markdown,
 )
 from .models import (
+    AudioReelsInput,
     BulkProfilesInput,
     CollabNetworkInput,
     CompareProfilesInput,
@@ -68,6 +80,13 @@ from .models import (
     DeepFeedInput,
     EngagementAnalysisInput,
     FeedTagResult,
+    FollowersInput,
+    FollowingInput,
+    HashtagInput,
+    HighlightsInput,
+    LocationPostsInput,
+    PostLikersInput,
+    SearchInput,
     InstagramProfile,
     PostCommentsInput,
     PostInput,
@@ -75,6 +94,7 @@ from .models import (
     ReelsInput,
     RepostsInput,
     ServerInput,
+    StoriesInput,
     TaggedByInput,
 )
 from .parser import (
@@ -210,8 +230,13 @@ async def _paginate_feed(
 # TOOL REGISTRATION
 # ═════════════════════════════════════════════════════════════════════════════
 
-def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> None:
-    """Register all 13 MCP tools (10 anonymous + 3 authenticated)."""
+def register_tools(
+    mcp: FastMCP,
+    client: InstagramClient,
+    config: MCPConfig,
+    exporter: JsonExporter,
+) -> None:
+    """Register all 19 MCP tools (10 anonymous + 8 authenticated + 1 auto)."""
 
     # ─────────────────────────────────────────────────────────────────────────
     # TOOL 1: instagram_profile
@@ -296,6 +321,7 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
             profile = parse_profile(user, params.username, config)
 
             is_dead, last_post_days = False, 0
+            feed_tags_result = None  # set in else branch below when include_feed=True
             if params.check_alive and not profile.is_private:
                 is_dead, last_post_days = check_dead_account(user, params.dead_threshold_days)
 
@@ -342,6 +368,12 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
 
         elapsed = time.perf_counter() - _t0
         await ctx.info(f"@{params.username} ✓ — {elapsed:.2f}s")
+        await exporter.save("profile", params.username, {
+            "profile": profile,
+            "feed_tags": feed_tags_result,
+            "is_dead": is_dead,
+            "last_post_days": last_post_days,
+        }, elapsed)
         return out
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -446,6 +478,13 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
             f"@{params.username} ✓ — {feed_tags.posts_checked} posts, "
             f"{len(feed_tags.tags)} tags — {elapsed:.2f}s"
         )
+        await exporter.save("feed_deep", params.username, {
+            "profile": profile,
+            "feed_tags": feed_tags,
+            "is_dead": is_dead,
+            "last_post_days": last_post_days,
+            "posts_fetched": len(feed_tags.posts),
+        }, elapsed)
         return out
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -537,6 +576,11 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
 
         elapsed = time.perf_counter() - _t0
         await ctx.info(f"@{params.username} ✓ — {len(feed_tags.posts)} posts — {elapsed:.2f}s")
+        await exporter.save("engagement", params.username, {
+            "profile": profile,
+            "posts": feed_tags.posts,
+            "posts_analyzed": len(feed_tags.posts),
+        }, elapsed)
         return out
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -628,6 +672,11 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
 
         elapsed = time.perf_counter() - _t0
         await ctx.info(f"@{params.username} ✓ — {len(feed_tags.posts)} posts — {elapsed:.2f}s")
+        await exporter.save("collab_network", params.username, {
+            "profile": profile,
+            "posts": feed_tags.posts,
+            "min_frequency": params.min_frequency,
+        }, elapsed)
         return out
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -701,6 +750,16 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
 
         elapsed = time.perf_counter() - _t0
         await ctx.info(f"Compare ✓ — {len(entries)} profiles — {elapsed:.2f}s")
+        _compare_subject = "+".join(cleaned)
+        if len(_compare_subject) > 60:
+            _compare_subject = _compare_subject[:57] + "..."
+        await exporter.save("compare", _compare_subject, {
+            "profiles": [
+                {"profile": p, "is_dead": is_dead, "last_post_days": days}
+                for p, is_dead, days in entries
+            ],
+            "count": len(entries),
+        }, elapsed)
         return out
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -780,6 +839,11 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
         found = sum(1 for r in parsed_results if r.get("found"))
         elapsed = time.perf_counter() - _t0
         await ctx.info(f"Bulk ✓ — {found}/{len(sanitized)} found — {elapsed:.2f}s")
+        await exporter.save("bulk_check", f"bulk_{len(sanitized)}", {
+            "results": parsed_results,
+            "total": len(parsed_results),
+            "found": found,
+        }, elapsed)
         return out
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -923,6 +987,26 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
             lines.append(f"**Output saved to:** `{params.output_file}`")
         elif _tmp_file:
             lines.append(f"**Temp output:** `{_tmp_file}` *(set output_file to persist)*")
+
+        await exporter.save("batch_scrape", f"batch_{len(sanitized)}", {
+            "stats": {
+                "total": stats.total,
+                "completed": stats.completed,
+                "active": stats.active,
+                "not_found": stats.not_found,
+                "private": stats.private,
+                "dead": stats.dead,
+                "error": stats.error,
+                "rate": round(stats.rate, 2),
+                "elapsed_seconds": round(stats.elapsed_seconds, 1),
+            },
+            "output_file": output_file,
+            "targets": sanitized,
+            "date_filter": {
+                "since": params.since_date or None,
+                "until": params.until_date or None,
+            },
+        }, elapsed)
 
         return "\n".join(lines)
 
@@ -1117,6 +1201,11 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
         elapsed = time.perf_counter() - _t0
         await ctx.info(f"@{params.username} tagged_by ✓ — {len(tagged_posts)} posts — {elapsed:.2f}s")
         await ctx.report_progress(float(len(tagged_posts)), float(params.max_posts), message="Done")
+        await exporter.save("tagged_by", params.username, {
+            "profile": profile,
+            "tagged_posts": tagged_posts,
+            "total": len(tagged_posts),
+        }, elapsed)
         return out
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -1247,6 +1336,12 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
         await ctx.report_progress(
             float(len(repost_items)), float(params.max_posts), message="Done"
         )
+        await exporter.save("reposts", params.username, {
+            "profile": profile,
+            "repost_items": repost_items,
+            "total": len(repost_items),
+            "pages_fetched": pages_fetched,
+        }, elapsed)
         return out
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -1345,6 +1440,7 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
             f"{loc_name} — {elapsed:.2f}s"
         )
         await ctx.report_progress(1.0, 1.0, message="Done")
+        await exporter.save("post", shortcode, {"post": info}, elapsed)
         return out
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -1468,6 +1564,12 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
         await ctx.report_progress(
             float(len(reel_items)), float(params.max_reels), message="Done"
         )
+        await exporter.save("reels", params.username, {
+            "profile": profile,
+            "reels": reel_items,
+            "total": len(reel_items),
+            "pages_fetched": pages_fetched,
+        }, elapsed)
         return out
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -1577,4 +1679,741 @@ def register_tools(mcp: FastMCP, client: InstagramClient, config: MCPConfig) -> 
         await ctx.report_progress(
             float(len(actual)), float(params.max_comments), message="Done"
         )
+        await exporter.save("comments", shortcode, {
+            "shortcode": shortcode,
+            "post_url": post_url,
+            "comment_count": comment_count,
+            "comments": comments,
+            "pages_fetched": pages_fetched,
+            "sort_order": params.sort_order,
+        }, elapsed)
+        return out
+
+    # ── Hashtag ───────────────────────────────────────────────────────────────
+
+    @mcp.tool(
+        name="instagram_hashtag",
+        annotations={
+            "title": "Instagram Hashtag Top Posts",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    )
+    async def instagram_hashtag(params: HashtagInput, ctx: Context) -> str:
+        """
+        🌐/🔐 AUTO-MODE — uses auth if cookies.json present, otherwise anonymous.
+
+        Fetch trending/top posts for an Instagram hashtag.
+
+        ┌──────────────────────────────────────────────────────────────────────┐
+        │ TWO MODES                                                            │
+        │                                                                      │
+        │ 🔐 AUTH (cookies.json present) — RECOMMENDED                         │
+        │  • Up to 300 posts (paginated, 30/page)                              │
+        │  • Full like counts + play counts + comment counts                   │
+        │  • Works for ALL hashtags incl. sensitive ones (#swimwear etc.)      │
+        │                                                                      │
+        │ 🌐 ANON (no cookies) — fallback                                       │
+        │  • Max 12 posts (Instagram SSR limit)                                │
+        │  • No like counts                                                    │
+        │  • Blocked for some hashtags (#swimwear, #bikini, #fitness …)        │
+        └──────────────────────────────────────────────────────────────────────┘
+
+        Returns per post: username, verified, like count, play count,
+        comment count, content type, shortcode + URL, caption.
+
+        Args:
+            params: tag (hashtag without #), max_posts (default 30, max 300)
+        """
+        tag = params.tag
+        auth_available = (
+            client.cookie_manager is not None
+            and getattr(client.cookie_manager, "is_authenticated", False)
+        )
+        mode = "🔐 auth" if auth_available else "🌐 anon"
+
+        await ctx.info(f"instagram_hashtag: #{tag} ({mode}, max={params.max_posts})")
+        _t0 = time.perf_counter()
+        await ctx.report_progress(0.0, float(params.max_posts), message=f"Fetching #{tag}...")
+
+        try:
+            result = await client.fetch_hashtag(
+                tag=tag,
+                max_posts=params.max_posts,
+                cache_ttl=config.cache_profile_ttl,
+            )
+        except Exception as e:
+            raise _exception_to_tool_error(e)
+
+        if result is None:
+            return (
+                f"**#{tag}** — not found or no public posts available.\n\n"
+                f"*The hashtag may not exist, or Instagram may have restricted access.*"
+            )
+
+        posts = result.get("posts") or []
+        related = result.get("related_searches") or []
+        has_more = result.get("has_more", False)
+
+        elapsed = time.perf_counter() - _t0
+        auth_used = result.get("auth_used", False)
+        await ctx.info(
+            f"Hashtag #{tag} ✓ — {len(posts)} posts "
+            f"({'auth' if auth_used else 'anon'}) — {elapsed:.2f}s"
+        )
+        await ctx.report_progress(float(len(posts)), float(params.max_posts), message="Done")
+
+        await exporter.save("hashtag", tag, {
+            "tag":             tag,
+            "posts":           posts,
+            "has_more":        has_more,
+            "related_searches": related,
+            "auth_used":       auth_used,
+        }, elapsed)
+
+        return format_hashtag_markdown(
+            tag=tag,
+            posts=posts,
+            related_searches=related,
+            has_more=has_more,
+            auth_used=auth_used,
+        )
+
+    # ── Search ────────────────────────────────────────────────────────────────
+
+    @mcp.tool(
+        name="instagram_search",
+        annotations={
+            "title": "Instagram Search",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    )
+    async def instagram_search(params: SearchInput, ctx: Context) -> str:
+        """
+        🔐 AUTH REQUIRED — Search Instagram for accounts and/or hashtags.
+
+        Finds users by name/username and hashtags by keyword in one call.
+
+        ┌──────────────────────────────────────────────────────────────────────┐
+        │ context options:                                                     │
+        │  'blended'  — users + hashtags (default, most useful)               │
+        │  'user'     — accounts only                                          │
+        │  'hashtag'  — hashtags only                                          │
+        └──────────────────────────────────────────────────────────────────────┘
+
+        Returns per user: username, full name, verified, private, follower count,
+        whether you follow them, whether they have a recent reel.
+        Returns per hashtag: name, total post count.
+
+        Use cases:
+          - Find an account when you only know a name: query='cristiano'
+          - Discover hashtags for a topic: query='football', context='hashtag'
+          - Check if a specific username exists: query='nike', context='user'
+
+        Args:
+            params: query (search term), context ('blended'/'user'/'hashtag')
+        """
+        await ctx.info(f"instagram_search: '{params.query}' context={params.context}")
+        _t0 = time.perf_counter()
+        await ctx.report_progress(0.0, 1.0, message=f"Searching '{params.query}'...")
+
+        try:
+            result = await client.fetch_search(
+                query=params.query,
+                context=params.context,
+                cache_ttl=config.cache_profile_ttl,
+            )
+        except Exception as e:
+            raise _exception_to_tool_error(e)
+
+        if result is None:
+            return (
+                "**instagram_search requires authentication.**\n\n"
+                "Please provide a valid `cookies.txt` or `cookies.json` with an active Instagram session.\n"
+                "Without auth, Instagram returns 401 for all search requests."
+            )
+
+        elapsed = time.perf_counter() - _t0
+        users    = result.get("users", [])
+        hashtags = result.get("hashtags", [])
+        has_more = result.get("has_more", False)
+
+        await ctx.info(
+            f"Search '{params.query}' ✓ — {len(users)} users, {len(hashtags)} hashtags — {elapsed:.2f}s"
+        )
+        await ctx.report_progress(1.0, 1.0, message="Done")
+
+        await exporter.save("search", params.query, {
+            "query":    params.query,
+            "context":  params.context,
+            "users":    users,
+            "hashtags": hashtags,
+            "has_more": has_more,
+        }, elapsed)
+
+        return format_search_markdown(
+            query=params.query,
+            users=users,
+            hashtags=hashtags,
+            context=params.context,
+            has_more=has_more,
+        )
+
+    # ── Followers List ────────────────────────────────────────────────────────
+
+    @mcp.tool(
+        name="instagram_followers_list",
+        annotations={
+            "title": "Instagram Followers List",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    )
+    async def instagram_followers_list(params: FollowersInput, ctx: Context) -> str:
+        """
+        🔐 AUTH REQUIRED — Fetch recent followers of an Instagram account.
+
+        ⚠️ Instagram API limitation: only ~50 most recent followers are returned
+        for accounts other than your own. Pagination is not available.
+
+        Returns per follower: username, full name, verified, private,
+        mutual follow status, recent reel activity.
+
+        Use cases:
+          - See who recently followed an account
+          - Analyse follower demographics (verified ratio, private ratio)
+          - Find mutual connections
+
+        Args:
+            params: username (without @)
+        """
+        await ctx.info(f"instagram_followers_list: @{params.username}")
+        _t0 = time.perf_counter()
+        await ctx.report_progress(0.0, 1.0, message=f"Fetching followers of @{params.username}...")
+
+        profile = await client.fetch_user(params.username)
+        if profile is None:
+            return f"**@{params.username}** — account not found or private."
+        user_pk = profile.get("pk") or profile.get("id") or ""
+        if not user_pk:
+            return f"**@{params.username}** — could not resolve user ID."
+
+        try:
+            result = await client.fetch_followers(
+                user_pk=str(user_pk),
+                max_users=params.max_users,
+                cache_ttl=config.cache_profile_ttl,
+            )
+        except Exception as e:
+            raise _exception_to_tool_error(e)
+
+        if result is None:
+            return (
+                "**instagram_followers_list requires authentication.**\n\n"
+                "Please provide a valid `cookies.txt` with an active Instagram session."
+            )
+
+        elapsed = time.perf_counter() - _t0
+        users         = result.get("users", [])
+        has_more      = result.get("has_more", False)
+        should_limit  = result.get("should_limit", False)
+        pages_fetched = result.get("pages_fetched", 1)
+
+        await ctx.info(
+            f"Followers @{params.username} ✓ — {len(users)} users, "
+            f"{pages_fetched} page(s) {'[limited]' if should_limit else ''} — {elapsed:.2f}s"
+        )
+        await ctx.report_progress(float(len(users)), float(params.max_users), message="Done")
+
+        await exporter.save("followers", params.username, {
+            "username":      params.username,
+            "user_pk":       str(user_pk),
+            "users":         users,
+            "has_more":      has_more,
+            "should_limit":  should_limit,
+            "pages_fetched": pages_fetched,
+        }, elapsed)
+
+        return format_followers_markdown(
+            username=params.username,
+            user_pk=str(user_pk),
+            users=users,
+            has_more=has_more,
+            should_limit=should_limit,
+            pages_fetched=pages_fetched,
+        )
+
+    # ── Following List ────────────────────────────────────────────────────────
+
+    @mcp.tool(
+        name="instagram_following_list",
+        annotations={
+            "title": "Instagram Following List",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    )
+    async def instagram_following_list(params: FollowingInput, ctx: Context) -> str:
+        """
+        🔐 AUTH REQUIRED — Fetch accounts that a user is following (with pagination).
+
+        Unlike followers, following list supports full pagination (50 per page).
+        Use max_users to control how many to fetch (default 200, max 1000).
+
+        Returns per account: username, full name, verified, private,
+        mutual follow status, favorite marker (⭐), recent reel activity.
+
+        Use cases:
+          - Map an account's network and partners
+          - Find brand ambassadors or collaborators they follow
+          - Identify who follows back (mutual)
+
+        Args:
+            params: username (without @), max_users (default 200)
+        """
+        await ctx.info(f"instagram_following_list: @{params.username} max={params.max_users}")
+        _t0 = time.perf_counter()
+        await ctx.report_progress(0.0, float(params.max_users), message=f"Fetching following of @{params.username}...")
+
+        profile = await client.fetch_user(params.username)
+        if profile is None:
+            return f"**@{params.username}** — account not found or private."
+        user_pk = profile.get("pk") or profile.get("id") or ""
+        if not user_pk:
+            return f"**@{params.username}** — could not resolve user ID."
+
+        try:
+            result = await client.fetch_following(
+                user_pk=str(user_pk),
+                max_users=params.max_users,
+                cache_ttl=config.cache_profile_ttl,
+            )
+        except Exception as e:
+            raise _exception_to_tool_error(e)
+
+        if result is None:
+            return (
+                "**instagram_following_list requires authentication.**\n\n"
+                "Please provide a valid `cookies.txt` with an active Instagram session."
+            )
+
+        elapsed = time.perf_counter() - _t0
+        users         = result.get("users", [])
+        has_more      = result.get("has_more", False)
+        pages_fetched = result.get("pages_fetched", 1)
+
+        await ctx.info(f"Following @{params.username} ✓ — {len(users)} users, {pages_fetched} pages — {elapsed:.2f}s")
+        await ctx.report_progress(float(len(users)), float(params.max_users), message="Done")
+
+        await exporter.save("following", params.username, {
+            "username":      params.username,
+            "user_pk":       str(user_pk),
+            "users":         users,
+            "has_more":      has_more,
+            "pages_fetched": pages_fetched,
+        }, elapsed)
+
+        return format_following_markdown(
+            username=params.username,
+            users=users,
+            has_more=has_more,
+            pages_fetched=pages_fetched,
+        )
+
+    # ── Post Likers ───────────────────────────────────────────────────────────
+
+    @mcp.tool(
+        name="instagram_post_likers",
+        annotations={
+            "title": "Instagram Post Likers",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    )
+    async def instagram_post_likers(params: PostLikersInput, ctx: Context) -> str:
+        """
+        🔐 AUTH REQUIRED — Fetch users who liked an Instagram post.
+
+        Returns ~98 likers (Instagram API limit, no pagination available).
+        Also shows total like count for the post.
+
+        Returns per liker: username, full name, verified, private,
+        mutual follow status (following/followed_by), recent reel activity.
+
+        Use cases:
+          - Identify engaged followers and fans
+          - Find influencers who engaged with a post
+          - Audience overlap analysis between accounts
+
+        Args:
+            params: post (shortcode like 'DXUoQBqiCrY' or full post URL)
+        """
+        await ctx.info(f"instagram_post_likers: {params.post}")
+        _t0 = time.perf_counter()
+        await ctx.report_progress(0.0, 1.0, message=f"Fetching likers for {params.post}...")
+
+        try:
+            result = await client.fetch_post_likers(
+                shortcode=params.post,
+                cache_ttl=config.cache_profile_ttl,
+            )
+        except Exception as e:
+            raise _exception_to_tool_error(e)
+
+        if result is None:
+            return (
+                "**instagram_post_likers requires authentication.**\n\n"
+                "Please provide a valid `cookies.txt` with an active Instagram session."
+            )
+
+        elapsed = time.perf_counter() - _t0
+        shortcode  = result.get("shortcode", params.post)
+        users      = result.get("users", [])
+        user_count = result.get("user_count", 0)
+
+        await ctx.info(f"Likers {shortcode} ✓ — {len(users)} shown / {user_count:,} total — {elapsed:.2f}s")
+        await ctx.report_progress(1.0, 1.0, message="Done")
+
+        await exporter.save("post_likers", shortcode, {
+            "shortcode":  shortcode,
+            "user_count": user_count,
+            "users":      users,
+        }, elapsed)
+
+        return format_post_likers_markdown(
+            shortcode=shortcode,
+            users=users,
+            user_count=user_count,
+        )
+
+    # ── Stories ───────────────────────────────────────────────────────────────
+
+    @mcp.tool(
+        name="instagram_stories",
+        annotations={
+            "readOnlyHint": True,
+            "idempotentHint": True,
+        },
+    )
+    async def instagram_stories(params: StoriesInput, ctx: Context) -> str:
+        """
+        🔐 AUTH REQUIRED — Requires a valid Instagram session via cookies.txt.
+
+        Fetch an account's currently active Instagram Stories.
+
+        Returns per story: media type (image/video), exact timestamp, expiry time,
+        video duration, music (title + artist), mention stickers, hashtag stickers,
+        linked post sticker, thumbnail URL, accessibility caption, paid partnership flag.
+
+        Stories expire after 24 hours — results are cached for 2 minutes.
+        Use for brand monitoring, competitor tracking, real-time content analysis.
+
+        Args:
+            params: username
+        """
+        cm = client.cookie_manager
+        if cm is None or not cm.is_authenticated:
+            setup_msg = cm.auth_required_error() if cm else (
+                "cookies.txt not found. Place a Netscape-format cookies.txt with your "
+                "Instagram session in the working directory, or set INSTAGRAM_MCP_COOKIES "
+                "env var to its path."
+            )
+            raise _tool_error(
+                f"instagram_stories requires authentication.\n\n{setup_msg}",
+                "auth_required",
+                "Export cookies from your browser after logging in to Instagram, "
+                "save as cookies.txt, and restart the MCP server.",
+            )
+
+        await ctx.info(f"instagram_stories: @{params.username}")
+        _t0 = time.perf_counter()
+        await ctx.report_progress(0.0, 1.0, message=f"Fetching stories for @{params.username}...")
+
+        try:
+            result = await client.fetch_stories(
+                username=params.username,
+            )
+        except Exception as e:
+            raise _exception_to_tool_error(e)
+
+        if result is None:
+            raise ToolError("No auth — stories requires authenticated session.")
+
+        items = result.get("items") or []
+        story_count = result.get("story_count", 0)
+        expiring_at = result.get("expiring_at", 0)
+        is_verified = result.get("is_verified", False)
+
+        out = format_stories_markdown(
+            username=params.username,
+            items=items,
+            story_count=story_count,
+            expiring_at=expiring_at,
+            is_verified=is_verified,
+        )
+
+        elapsed = time.perf_counter() - _t0
+        await ctx.info(f"@{params.username} stories ✓ — {story_count} stories — {elapsed:.2f}s")
+        await ctx.report_progress(1.0, 1.0, message="Done")
+        await exporter.save("stories", params.username, result, elapsed)
+        return out
+
+    # ── Highlights ────────────────────────────────────────────────────────────
+
+    @mcp.tool(
+        name="instagram_highlights",
+        annotations={
+            "readOnlyHint": True,
+            "idempotentHint": True,
+        },
+    )
+    async def instagram_highlights(params: HighlightsInput, ctx: Context) -> str:
+        """
+        🔐 AUTH REQUIRED — Requires a valid Instagram session via cookies.txt.
+
+        Fetch an account's Highlights — curated story collections that stay permanently
+        on their profile.
+
+        Two modes:
+        - Tray only (default): returns all highlight titles, story counts, cover images,
+          and creation dates in one fast API call.
+        - With media (include_media=True): also fetches the actual story items inside
+          each highlight (up to max_media_highlights). Each item has the same rich
+          fields as instagram_stories: media type, timestamp, music, mention stickers,
+          link stickers, poll stickers, linked post stickers.
+
+        Use for: brand audit (what topics they highlight), content strategy analysis,
+        influencer research, archival monitoring.
+
+        Args:
+            params: username, max_highlights (1-200, default 50),
+                    include_media (bool, default False),
+                    max_media_highlights (1-10, default 3)
+        """
+        cm = client.cookie_manager
+        if cm is None or not cm.is_authenticated:
+            setup_msg = cm.auth_required_error() if cm else (
+                "cookies.txt not found. Place a Netscape-format cookies.txt with your "
+                "Instagram session in the working directory, or set INSTAGRAM_MCP_COOKIES "
+                "env var to its path."
+            )
+            raise _tool_error(
+                f"instagram_highlights requires authentication.\n\n{setup_msg}",
+                "auth_required",
+                "Export cookies from your browser after logging in to Instagram, "
+                "save as cookies.txt, and restart the MCP server.",
+            )
+
+        await ctx.info(f"instagram_highlights: @{params.username} (max={params.max_highlights}, media={params.include_media})")
+        _t0 = time.perf_counter()
+        await ctx.report_progress(0.0, 1.0, message=f"Fetching highlights for @{params.username}...")
+
+        try:
+            result = await client.fetch_highlights(
+                username=params.username,
+                max_highlights=params.max_highlights,
+                include_media=params.include_media,
+                max_media_highlights=params.max_media_highlights,
+            )
+        except Exception as e:
+            raise _exception_to_tool_error(e)
+
+        if result is None:
+            raise ToolError("No auth — highlights requires authenticated session.")
+
+        highlights = result.get("highlights") or []
+        highlight_count = result.get("highlight_count", 0)
+        is_verified = result.get("is_verified", False)
+
+        out = format_highlights_markdown(
+            username=params.username,
+            highlights=highlights,
+            highlight_count=highlight_count,
+            is_verified=is_verified,
+        )
+
+        elapsed = time.perf_counter() - _t0
+        await ctx.info(f"@{params.username} highlights ✓ — {highlight_count} highlights — {elapsed:.2f}s")
+        await ctx.report_progress(1.0, 1.0, message="Done")
+        await exporter.save("highlights", params.username, result, elapsed)
+        return out
+
+    # ── Location Posts ────────────────────────────────────────────────────────
+
+    @mcp.tool(
+        name="instagram_location_posts",
+        annotations={
+            "readOnlyHint": True,
+            "idempotentHint": True,
+        },
+    )
+    async def instagram_location_posts(params: LocationPostsInput, ctx: Context) -> str:
+        """
+        🔐 AUTH REQUIRED — Requires a valid Instagram session via cookies.txt.
+
+        Fetch top/ranked posts for an Instagram location.
+
+        Two modes:
+        - By location_id: provide the numeric Instagram location ID directly
+          (e.g. '213385402' for New York).
+        - By location_name: provide a name/search query; the tool will resolve
+          the location ID automatically via Instagram's location search.
+
+        Returns a ranked table of posts with likes, comments, play counts,
+        author info, and post links.
+
+        Args:
+            params: location_id (numeric ID) or location_name (search query),
+                    max_posts (1-100, default 33)
+        """
+        cm = client.cookie_manager
+        if cm is None or not cm.is_authenticated:
+            setup_msg = cm.auth_required_error() if cm else (
+                "cookies.txt not found. Place a Netscape-format cookies.txt with your "
+                "Instagram session in the working directory, or set INSTAGRAM_MCP_COOKIES "
+                "env var to its path."
+            )
+            raise _tool_error(
+                f"instagram_location_posts requires authentication.\n\n{setup_msg}",
+                "auth_required",
+                "Export cookies from your browser after logging in to Instagram, "
+                "save as cookies.txt, and restart the MCP server.",
+            )
+
+        if not params.location_id and not params.location_name:
+            raise _tool_error(
+                "Provide either location_id (numeric) or location_name (search query).",
+                "missing_param",
+                "Example: location_id='213385402' or location_name='Tashkent'",
+            )
+
+        label = params.location_id or params.location_name
+        await ctx.info(f"instagram_location_posts: {label!r} (max={params.max_posts})")
+        _t0 = time.perf_counter()
+        await ctx.report_progress(0.0, 1.0, message=f"Fetching location posts for {label!r}...")
+
+        try:
+            result = await client.fetch_location_posts(
+                location_id=params.location_id,
+                location_name=params.location_name,
+                max_posts=params.max_posts,
+            )
+        except Exception as e:
+            raise _exception_to_tool_error(e)
+
+        if result is None:
+            raise _tool_error(
+                "No auth — instagram_location_posts requires authenticated session.",
+                "auth_required",
+            )
+
+        posts         = result.get("posts") or []
+        post_count    = result.get("post_count", 0)
+        location_id   = result.get("location_id", "")
+        location_name = result.get("location_name", "")
+        more_available = result.get("more_available", False)
+
+        out = format_location_posts_markdown(
+            location_id=location_id,
+            location_name=location_name,
+            posts=posts,
+            post_count=post_count,
+            more_available=more_available,
+        )
+
+        elapsed = time.perf_counter() - _t0
+        await ctx.info(f"location_posts {label!r} ✓ — {post_count} posts — {elapsed:.2f}s")
+        await ctx.report_progress(1.0, 1.0, message="Done")
+        await exporter.save("location_posts", label, result, elapsed)
+        return out
+
+    # ── Audio Reels ───────────────────────────────────────────────────────────
+
+    @mcp.tool(
+        name="instagram_audio_reels",
+        annotations={
+            "readOnlyHint": True,
+            "idempotentHint": True,
+        },
+    )
+    async def instagram_audio_reels(params: AudioReelsInput, ctx: Context) -> str:
+        """
+        🔐 AUTH REQUIRED — Requires a valid Instagram session via cookies.txt.
+
+        Fetch reels that use a specific Instagram audio track.
+
+        Provide the audio_cluster_id (found in a reel's music metadata or
+        from the audio page URL at instagram.com/reels/audio/{id}/).
+
+        Returns a table of reels using this audio with likes, play counts,
+        author info, and links.
+
+        Args:
+            params: audio_cluster_id (required), max_reels (1-100, default 24)
+        """
+        cm = client.cookie_manager
+        if cm is None or not cm.is_authenticated:
+            setup_msg = cm.auth_required_error() if cm else (
+                "cookies.txt not found. Place a Netscape-format cookies.txt with your "
+                "Instagram session in the working directory, or set INSTAGRAM_MCP_COOKIES "
+                "env var to its path."
+            )
+            raise _tool_error(
+                f"instagram_audio_reels requires authentication.\n\n{setup_msg}",
+                "auth_required",
+                "Export cookies from your browser after logging in to Instagram, "
+                "save as cookies.txt, and restart the MCP server.",
+            )
+
+        await ctx.info(f"instagram_audio_reels: audio_cluster_id={params.audio_cluster_id!r} (max={params.max_reels})")
+        _t0 = time.perf_counter()
+        await ctx.report_progress(0.0, 1.0, message=f"Fetching audio reels for {params.audio_cluster_id!r}...")
+
+        try:
+            result = await client.fetch_audio_reels(
+                audio_cluster_id=params.audio_cluster_id,
+                max_reels=params.max_reels,
+            )
+        except Exception as e:
+            raise _exception_to_tool_error(e)
+
+        if result is None:
+            raise _tool_error(
+                "No auth — instagram_audio_reels requires authenticated session.",
+                "auth_required",
+            )
+
+        posts            = result.get("posts") or []
+        audio_cluster_id = result.get("audio_cluster_id", "")
+        music_title      = result.get("music_title", "")
+        music_artist     = result.get("music_artist", "")
+        total_reels_str  = result.get("total_reels_str", "")
+        more_available   = result.get("more_available", False)
+
+        out = format_audio_reels_markdown(
+            audio_cluster_id=audio_cluster_id,
+            music_title=music_title,
+            music_artist=music_artist,
+            posts=posts,
+            total_reels_str=total_reels_str,
+            more_available=more_available,
+        )
+
+        elapsed = time.perf_counter() - _t0
+        await ctx.info(
+            f"audio_reels {audio_cluster_id!r} ✓ — {len(posts)} reels — {elapsed:.2f}s"
+        )
+        await ctx.report_progress(1.0, 1.0, message="Done")
+        await exporter.save("audio_reels", audio_cluster_id, result, elapsed)
         return out

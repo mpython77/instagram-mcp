@@ -167,9 +167,17 @@ async def test_get_auth_session_closed(client):
 def test_close_sessions_sync(client):
     with patch("asyncio.get_running_loop") as mock_get_loop:
         mock_loop = MagicMock()
+        scheduled = []
+        def _capture(coro):
+            scheduled.append(coro)
+            return MagicMock()
+        mock_loop.create_task.side_effect = _capture
         mock_get_loop.return_value = mock_loop
         client.close_sessions()
         mock_loop.create_task.assert_called_once()
+        # Close the coroutine so the test doesn't leak a "never awaited" warning
+        for coro in scheduled:
+            coro.close()
 
 def test_close_sessions_sync_no_loop(client):
     with patch("asyncio.get_running_loop", side_effect=RuntimeError):

@@ -235,6 +235,31 @@ class TaggedPost:
 
 
 @dataclass
+class StoryItem:
+    pk: str
+    shortcode: str
+    taken_at: int
+    taken_at_str: str
+    expiring_at: int
+    media_type: int           # 1=image, 2=video
+    duration_secs: float      # 0.0 if image
+    width: int
+    height: int
+    thumbnail_url: str        # best quality image URL
+    caption: str
+    accessibility_caption: str
+    is_paid_partnership: bool
+    can_reshare: bool
+    can_reply: bool
+    has_audio: bool
+    mentions: List[str]       # usernames from mention stickers
+    hashtags: List[str]       # from hashtag stickers
+    linked_post_code: str     # from story_feed_media (post sticker)
+    music_title: str
+    music_artist: str
+
+
+@dataclass
 class DateRange:
     """Unix timestamp range for filtering posts."""
     since: Optional[int] = None   # Unix timestamp
@@ -959,3 +984,229 @@ class ServerInput(BaseModel):
             "Leave empty for 'status' or 'clear_cache'."
         ),
     )
+
+
+class HashtagInput(BaseModel):
+    """Input for instagram_hashtag tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    tag: str = Field(
+        description=(
+            "Hashtag to search (without #). "
+            "Example: 'football', 'photography', 'travel'."
+        ),
+    )
+    max_posts: int = Field(
+        default=30,
+        ge=1,
+        le=300,
+        description=(
+            "Maximum posts to return. "
+            "🔐 Auth mode: up to 300 (30/page, paginated). "
+            "🌐 Anon mode: always 12 regardless of this value."
+        ),
+    )
+
+    @field_validator("tag")
+    @classmethod
+    def clean_tag(cls, v: str) -> str:
+        v = v.lstrip("#").strip().lower()
+        if not v:
+            raise ValueError("tag must not be empty")
+        return v
+
+
+class SearchInput(BaseModel):
+    """Input for instagram_search tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    query: str = Field(
+        description=(
+            "Search keyword. Can be a username, full name, or hashtag topic. "
+            "Example: 'cristiano', 'nike', 'football'."
+        ),
+    )
+    context: str = Field(
+        default="blended",
+        description=(
+            "What to search for. "
+            "'blended' = users + hashtags (default). "
+            "'user' = accounts only. "
+            "'hashtag' = hashtags only."
+        ),
+    )
+
+    @field_validator("query")
+    @classmethod
+    def clean_query(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("query must not be empty")
+        return v
+
+    @field_validator("context")
+    @classmethod
+    def clean_context(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in ("blended", "user", "hashtag"):
+            raise ValueError("context must be 'blended', 'user', or 'hashtag'")
+        return v
+
+
+
+class FollowersInput(BaseModel):
+    """Input for instagram_followers_list tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    username: str = Field(
+        description="Instagram username (without @). Example: 'nike', 'cristiano'."
+    )
+    max_users: int = Field(
+        default=50,
+        ge=1,
+        le=1000,
+        description=(
+            "Maximum followers to return. "
+            "YOUR OWN account: full pagination (50/page), up to 1000. "
+            "OTHER accounts: Instagram limits to ~50 regardless."
+        ),
+    )
+
+    @field_validator("username")
+    @classmethod
+    def clean_username(cls, v: str) -> str:
+        v = v.lstrip("@").strip().lower()
+        if not v:
+            raise ValueError("username must not be empty")
+        return v
+
+
+class FollowingInput(BaseModel):
+    """Input for instagram_following_list tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    username: str = Field(
+        description="Instagram username (without @). Example: 'nike', 'adidas'."
+    )
+    max_users: int = Field(
+        default=200,
+        ge=1,
+        le=1000,
+        description="Maximum number of following accounts to return (50 per page). Default 200.",
+    )
+
+    @field_validator("username")
+    @classmethod
+    def clean_username(cls, v: str) -> str:
+        v = v.lstrip("@").strip().lower()
+        if not v:
+            raise ValueError("username must not be empty")
+        return v
+
+
+class StoriesInput(BaseModel):
+    username: str = Field(..., description="Instagram username without @.", min_length=1, max_length=30)
+
+    @field_validator("username")
+    @classmethod
+    def clean_username(cls, v: str) -> str:
+        v = v.strip().lstrip("@")
+        if not v:
+            raise ValueError("username cannot be empty")
+        return v
+
+
+class HighlightsInput(BaseModel):
+    username: str = Field(..., description="Instagram username without @.", min_length=1, max_length=30)
+    max_highlights: int = Field(default=50, ge=1, le=200, description="Max highlights to return from tray (1-200).")
+    include_media: bool = Field(default=False, description="Fetch media items inside each highlight. Requires extra API calls.")
+    max_media_highlights: int = Field(default=3, ge=1, le=10, description="If include_media=True, fetch media for top N highlights (1-10).")
+
+    @field_validator("username")
+    @classmethod
+    def clean_username(cls, v: str) -> str:
+        v = v.strip().lstrip("@")
+        if not v:
+            raise ValueError("username cannot be empty")
+        return v
+
+
+class LocationPostsInput(BaseModel):
+    """Input for instagram_location_posts tool (AUTH REQUIRED)."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    location_id: str = Field(
+        default="",
+        description=(
+            "Instagram location ID (numeric). "
+            "If empty, location_name is used for a search query. "
+            "Example: '213385402' for New York."
+        ),
+    )
+    location_name: str = Field(
+        default="",
+        description=(
+            "Location name to search (if location_id is not provided). "
+            "Example: 'Tashkent', 'Central Park New York'."
+        ),
+    )
+    max_posts: int = Field(
+        default=33,
+        ge=1,
+        le=100,
+        description="Maximum posts to return (1-100). Default: 33.",
+    )
+
+    @field_validator("location_id", "location_name", mode="before")
+    @classmethod
+    def clean(cls, v: object) -> str:
+        return (str(v) if v is not None else "").strip()
+
+
+class AudioReelsInput(BaseModel):
+    """Input for instagram_audio_reels tool (AUTH REQUIRED)."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    audio_cluster_id: str = Field(
+        description=(
+            "Instagram audio cluster ID. "
+            "Find it in a reel's clips_metadata.music_info or from the audio page URL. "
+            "Example: '260841894490983'."
+        ),
+    )
+    max_reels: int = Field(
+        default=24,
+        ge=1,
+        le=100,
+        description="Maximum reels to return (1-100). Default: 24.",
+    )
+
+    @field_validator("audio_cluster_id", mode="before")
+    @classmethod
+    def clean(cls, v: object) -> str:
+        v_str = (str(v) if v is not None else "").strip()
+        if not v_str:
+            raise ValueError("audio_cluster_id must not be empty")
+        return v_str
+
+
+class PostLikersInput(BaseModel):
+    """Input for instagram_post_likers tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    post: str = Field(
+        description=(
+            "Post shortcode or full URL. "
+            "Example: 'DXUoQBqiCrY' or 'https://www.instagram.com/p/DXUoQBqiCrY/'."
+        )
+    )
+
+    @field_validator("post")
+    @classmethod
+    def clean_post(cls, v: str) -> str:
+        v = v.strip()
+        if "/" in v:
+            v = [p for p in v.rstrip("/").split("/") if p][-1]
+        if not v:
+            raise ValueError("post shortcode must not be empty")
+        return v

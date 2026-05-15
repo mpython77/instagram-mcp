@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 from dataclasses import asdict
-from datetime import datetime as _dt
+from datetime import datetime as _dt, timezone as _tz
 from typing import Any, Dict, List, Optional, Tuple
 
 from .models import (
@@ -1443,5 +1443,705 @@ def format_comments_markdown(
 
     if pages_fetched > 1:
         lines += ["", f"*Fetched across {pages_fetched} pages.*"]
+
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HASHTAG FORMATTER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def format_search_markdown(
+    query: str,
+    users: list,
+    hashtags: list,
+    context: str,
+    has_more: bool,
+) -> str:
+    """Format instagram_search results as readable markdown."""
+    _fmt = format_followers
+    lines = [
+        f"# Instagram Search — \"{query}\"",
+        "",
+        f"**Context:** {context}  |  **Users:** {len(users)}  |  **Hashtags:** {len(hashtags)}",
+        "",
+    ]
+
+    if not users and not hashtags:
+        lines += ["*No results found.*"]
+        return "\n".join(lines)
+
+    if users:
+        lines += [
+            "## Accounts",
+            "",
+            "| # | Username | Full Name | ✓ | 🔒 | Social | Relation | 🎬 | 🧵 |",
+            "|---|----------|-----------|---|----|----|-------|----|-----|",
+        ]
+        for u in users:
+            pos      = u.get("position", "")
+            username = u.get("username", "")
+            full     = u.get("full_name", "")[:26]
+            verified = "✓" if u.get("is_verified") else ""
+            private  = "🔒" if u.get("is_private") else ""
+            followers = u.get("follower_count_text", "—")
+            # relation column
+            if u.get("you_follow_them") and u.get("they_follow_you"):
+                relation = "mutual"
+            elif u.get("you_follow_them"):
+                relation = "you follow"
+            elif u.get("they_follow_you"):
+                relation = "follows you"
+            elif u.get("follow_request_sent"):
+                relation = "req sent"
+            else:
+                relation = "—"
+            if u.get("is_bestie"):
+                relation += " ⭐"
+            reel   = "🎬" if u.get("has_recent_reel") else "—"
+            threads = "🧵" if u.get("has_threads") else "—"
+            lines.append(
+                f"| {pos} | [@{username}](https://www.instagram.com/{username}/) | {full} | {verified} | {private} | {followers} | {relation} | {reel} | {threads} |"
+            )
+
+    if hashtags:
+        lines += [
+            "",
+            "## Hashtags",
+            "",
+            "| # | Hashtag | Posts |",
+            "|---|---------|-------|",
+        ]
+        for ht in hashtags:
+            pos   = ht.get("position", "")
+            name  = ht.get("name", "")
+            count = ht.get("subtitle") or f"{ht.get('media_count', 0):,} posts"
+            lines.append(f"| {pos} | [#{name}](https://www.instagram.com/explore/tags/{name}/) | {count} |")
+
+    if has_more:
+        lines += ["", "*More results available.*"]
+
+    lines += ["", "---", "*Data: Instagram topsearch API — authenticated session.*"]
+    return "\n".join(lines)
+
+
+def _account_type_icon(at: int) -> str:
+    return {1: "👤", 2: "🎨", 3: "🏢"}.get(at, "")
+
+
+def _media_type_label(post: dict) -> str:
+    mt = post.get("media_type", 1)
+    pt = post.get("product_type", "")
+    if mt == 8:
+        count = post.get("carousel_count") or ""
+        return f"🎠{count}"
+    if mt == 2:
+        dur = post.get("video_duration")
+        dur_s = f" {dur:.0f}s" if dur else ""
+        return f"🎬{dur_s}"
+    return "🖼"
+
+
+def format_hashtag_markdown(
+    tag: str,
+    posts: list,
+    related_searches: list,
+    has_more: bool,
+    auth_used: bool = False,
+) -> str:
+    """Format hashtag top-posts result as readable markdown."""
+    _fmt = format_followers
+
+    mode_label = "🔐 auth — paginated" if auth_used else "🌐 anon — up to 12 posts"
+    lines = [
+        f"# #{tag} — Top Posts",
+        "",
+        f"**Mode:** {mode_label}  |  **Posts shown:** {len(posts)}",
+        "",
+    ]
+
+    if not posts:
+        lines += ["*No posts found for this hashtag.*"]
+        return "\n".join(lines)
+
+    # Auth mode: flat dicts with like_count; anon mode: nested node dicts
+    is_auth_format = auth_used or ("shortcode" in (posts[0] if posts else {}))
+
+    lines += ["## Posts", ""]
+    if is_auth_format:
+        lines += [
+            "| # | Author | ✓ | Acct | ❤ Likes | 👁 Views | ♻ | 💬 | Type | 🎵 | 👥 | Link | Caption |",
+            "|---|--------|---|------|---------|---------|---|-----|------|----|-----|------|---------|",
+        ]
+    else:
+        lines += [
+            "| # | Author | ✓ | 👁 Views | Type | Link | Caption |",
+            "|---|--------|---|---------|------|------|---------|",
+        ]
+
+    for i, post in enumerate(posts, 1):
+        if is_auth_format:
+            username  = post.get("username", "")
+            verified  = "✓" if post.get("verified") else ""
+            acct_icon = _account_type_icon(post.get("account_type", 0))
+            code      = post.get("shortcode", "")
+            likes     = _fmt(post.get("like_count") or 0) if post.get("like_count") is not None else "—"
+            views     = _fmt(post.get("play_count") or 0) if post.get("play_count") else "—"
+            reposts   = _fmt(post.get("repost_count") or 0) if post.get("repost_count") else "—"
+            comments  = _fmt(post.get("comment_count") or 0) if post.get("comment_count") else "—"
+            mtype     = _media_type_label(post)
+            music_title = post.get("music_title") or ""
+            music_cell  = music_title[:20].replace("|", "\\|") + ("…" if len(music_title) > 20 else "") if music_title else "—"
+            tagged    = post.get("tagged_users") or []
+            tag_cell  = str(len(tagged)) if tagged else "—"
+            cap_raw   = post.get("caption", "") or ""
+            caption   = cap_raw[:50].replace("|", "\\|").replace("\n", " ")
+            if len(cap_raw) > 50: caption += "…"
+            lines.append(
+                f"| {i} | @{username} | {verified} | {acct_icon} | {likes} | {views} | {reposts} | {comments} | {mtype} | "
+                f"{music_cell} | {tag_cell} | [{code}](https://www.instagram.com/p/{code}/) | {caption} |"
+            )
+        else:
+            node = post.get("node", {}) if "node" in post else post
+            user = node.get("user") or {}
+            username   = user.get("username", "")
+            verified   = "✓" if user.get("is_verified") else ""
+            code       = node.get("code", "")
+            play_count = node.get("play_count") or node.get("view_count")
+            views      = _fmt(int(play_count)) if play_count else "—"
+            typename   = node.get("__typename", "")
+            mtype      = "🎬" if "Video" in typename else "🖼"
+            cap_obj    = node.get("caption") or {}
+            cap_raw    = (cap_obj.get("text") or "") if isinstance(cap_obj, dict) else ""
+            caption    = cap_raw[:55].replace("|", "\\|").replace("\n", " ")
+            if len(cap_raw) > 55: caption += "…"
+            lines.append(
+                f"| {i} | @{username} | {verified} | {views} | {mtype} | "
+                f"[{code}](https://www.instagram.com/p/{code}/) | {caption} |"
+            )
+
+    if has_more:
+        lines += ["", f"*More posts available — increase `max_posts` to fetch more.*"]
+
+    # Auth mode: show aggregate stats
+    if is_auth_format and posts:
+        music_count  = sum(1 for p in posts if p.get("music_title"))
+        tagged_count = sum(1 for p in posts if p.get("tagged_users"))
+        paid_count   = sum(1 for p in posts if p.get("is_paid_partnership"))
+        collab_count = sum(1 for p in posts if p.get("coauthors"))
+        acct_types   = Counter(p.get("account_type", 0) for p in posts)
+        media_types  = Counter(p.get("media_type", 1) for p in posts)
+        lines += [
+            "",
+            "## Summary",
+            "",
+            f"- 🎬 Videos: {media_types.get(2, 0)}  |  🎠 Carousels: {media_types.get(8, 0)}  |  🖼 Photos: {media_types.get(1, 0)}",
+            f"- 👤 Personal: {acct_types.get(1, 0)}  |  🎨 Creator: {acct_types.get(2, 0)}  |  🏢 Business: {acct_types.get(3, 0)}",
+            f"- 🎵 With music: {music_count}  |  👥 With tagged users: {tagged_count}  |  🤝 Collabs: {collab_count}  |  💼 Paid partnerships: {paid_count}",
+        ]
+
+    if related_searches:
+        lines += ["", "## Related Searches", ""]
+        for term in related_searches:
+            lines.append(f"- {term}")
+
+    lines += ["", "---"]
+    if auth_used:
+        lines.append("*Data: Instagram /api/v1/tags/sections/ — authenticated session. Columns: ♻=reposts, 🎵=music, 👥=tagged users count.*")
+    else:
+        lines.append("*Data: public Instagram explore page (logged-out). Like counts unavailable without auth.*")
+
+    return "\n".join(lines)
+
+
+def _follow_user_row(i: int, u: dict, extra_cols: list = None) -> str:
+    """Render one user row for followers/following/likers tables."""
+    username  = u.get("username", "")
+    full      = (u.get("full_name", "") or "")[:24]
+    verified  = "✓" if u.get("is_verified") else ""
+    private   = "🔒" if u.get("is_private") else ""
+    reel      = "🎬" if u.get("has_recent_reel") else "—"
+    you_fw    = u.get("you_follow_them", False)
+    they_fw   = u.get("they_follow_you", False)
+    if you_fw and they_fw:
+        rel = "mutual"
+    elif you_fw:
+        rel = "you follow"
+    elif they_fw:
+        rel = "follows you"
+    elif u.get("follow_req_sent"):
+        rel = "req sent"
+    else:
+        rel = "—"
+    if u.get("is_bestie"):
+        rel += " ⭐"
+
+    base = f"| {i} | [@{username}](https://www.instagram.com/{username}/) | {full} | {verified} | {private} | {rel} | {reel} |"
+    if extra_cols:
+        base += " " + " | ".join(str(c) for c in extra_cols) + " |"
+    return base
+
+
+def format_followers_markdown(
+    username: str,
+    user_pk: str,
+    users: list,
+    has_more: bool,
+    should_limit: bool,
+    pages_fetched: int = 1,
+) -> str:
+    lines = [
+        f"# @{username} — Recent Followers",
+        "",
+        f"**Users shown:** {len(users)}  |  **Pages fetched:** {pages_fetched}",
+    ]
+    if has_more and not should_limit:
+        lines.append("*More followers available — increase `max_users` to fetch more.*")
+    if should_limit:
+        lines.append(
+            "> ⚠️ Instagram limits follower lists for public accounts — only ~50 recent followers visible. "
+            "Full pagination is unavailable for others' accounts."
+        )
+    lines.append("")
+
+    if not users:
+        lines += ["*No followers found.*"]
+        return "\n".join(lines)
+
+    lines += [
+        "| # | Username | Full Name | ✓ | 🔒 | Relation | 🎬 |",
+        "|---|----------|-----------|---|----|-----------|----|",
+    ]
+    for i, u in enumerate(users, 1):
+        lines.append(_follow_user_row(i, u))
+
+    verified_count = sum(1 for u in users if u.get("is_verified"))
+    private_count  = sum(1 for u in users if u.get("is_private"))
+    reel_count     = sum(1 for u in users if u.get("has_recent_reel"))
+    lines += [
+        "",
+        f"**Verified:** {verified_count}  |  **Private:** {private_count}  |  **Active reels:** {reel_count}",
+        "",
+        "---",
+        "*Data: Instagram /api/v1/friendships/{pk}/followers/ — authenticated session.*",
+    ]
+    return "\n".join(lines)
+
+
+def format_following_markdown(
+    username: str,
+    users: list,
+    has_more: bool,
+    pages_fetched: int,
+) -> str:
+    lines = [
+        f"# @{username} — Following",
+        "",
+        f"**Users shown:** {len(users)}  |  **Pages fetched:** {pages_fetched}",
+    ]
+    if has_more:
+        lines.append("*More accounts available — increase `max_users` to fetch more.*")
+    lines.append("")
+
+    if not users:
+        lines += ["*Not following anyone (or private account).*"]
+        return "\n".join(lines)
+
+    lines += [
+        "| # | Username | Full Name | ✓ | 🔒 | Relation | 🎬 | ⭐ |",
+        "|---|----------|-----------|---|----|-----------|----|-----|",
+    ]
+    for i, u in enumerate(users, 1):
+        fav = "⭐" if u.get("is_favorite") else "—"
+        lines.append(_follow_user_row(i, u, extra_cols=[fav]))
+
+    verified_count = sum(1 for u in users if u.get("is_verified"))
+    fav_count      = sum(1 for u in users if u.get("is_favorite"))
+    reel_count     = sum(1 for u in users if u.get("has_recent_reel"))
+    lines += [
+        "",
+        f"**Verified:** {verified_count}  |  **Favorites:** {fav_count}  |  **Active reels:** {reel_count}",
+        "",
+        "---",
+        "*Data: Instagram /api/v1/friendships/{pk}/following/ — authenticated session.*",
+    ]
+    return "\n".join(lines)
+
+
+def format_stories_markdown(
+    username: str,
+    items: list,
+    story_count: int,
+    expiring_at: int,
+    is_verified: bool = False,
+) -> str:
+    tick = " ✅" if is_verified else ""
+    lines = [f"# 📖 Stories — @{username}{tick}", ""]
+
+    if not story_count:
+        expiry_str = ""
+        if expiring_at:
+            try:
+                expiry_str = f" — expires {_dt.fromtimestamp(expiring_at, tz=_tz.utc).strftime('%Y-%m-%d %H:%M')} UTC"
+            except Exception:
+                pass
+        lines.append(f"*No active stories.*")
+        return "\n".join(lines)
+
+    expiry_str = ""
+    if expiring_at:
+        try:
+            expiry_str = f" — expires {_dt.fromtimestamp(expiring_at, tz=_tz.utc).strftime('%Y-%m-%d %H:%M')} UTC"
+        except Exception:
+            pass
+    lines.append(f"**{story_count} active stories**{expiry_str}")
+    lines.append("")
+
+    lines += [
+        "| # | Type | Time | Duration | 🎵 | 📎 | 👥 Mentions | #️⃣ | 🔗 Link | 📊 Poll | Caption |",
+        "|---|------|------|----------|----|----|----|---|--------|------|---------|",
+    ]
+    for i, item in enumerate(items, 1):
+        mtype = item.get("media_type", 1)
+        type_icon = "🎬" if mtype == 2 else "🖼"
+        taken = item.get("taken_at_str", "—")
+        dur_secs = item.get("duration_secs") or 0.0
+        dur = f"{int(dur_secs)}s" if mtype == 2 else "—"
+
+        music_title = item.get("music_title", "") or ""
+        music_cell = (music_title[:18] + ("…" if len(music_title) > 18 else "")) if music_title else "—"
+
+        linked = item.get("linked_post_code", "") or ""
+        linked_cell = f"[post](https://www.instagram.com/p/{linked}/)" if linked else "—"
+
+        mentions = item.get("mentions") or []
+        mention_cell = " ".join(f"@{m}" for m in mentions[:3]) if mentions else "—"
+
+        hashtags = item.get("hashtags") or []
+        hashtag_cell = " ".join(f"#{h}" for h in hashtags[:2]) if hashtags else "—"
+
+        link_stickers = item.get("link_stickers") or []
+        if link_stickers:
+            ls = link_stickers[0]
+            disp = ls.get("display_url", "") or ls.get("url", "")
+            link_cell = f"[{disp[:25]}]({ls.get('url', '')})" if disp else "🔗"
+        else:
+            link_cell = "—"
+
+        polls = item.get("polls") or []
+        if polls:
+            p = polls[0]
+            q = p.get("question", "") or "Poll"
+            tallies = p.get("tallies", [])
+            total = sum(t.get("count", 0) for t in tallies)
+            poll_cell = f"📊{total}" if total else "📊"
+        else:
+            poll_cell = "—"
+
+        cap = item.get("caption", "") or ""
+        if not cap:
+            cap = item.get("accessibility_caption", "") or ""
+        caption_cell = (cap[:35].replace("|", "\\|") + ("…" if len(cap) > 35 else "")) if cap else "—"
+
+        lines.append(
+            f"| {i} | {type_icon} | {taken} | {dur} | {music_cell} | {linked_cell} | {mention_cell} | {hashtag_cell} | {link_cell} | {poll_cell} | {caption_cell} |"
+        )
+
+    images = sum(1 for i in items if i.get("media_type") == 1)
+    videos = sum(1 for i in items if i.get("media_type") == 2)
+    with_music = sum(1 for i in items if i.get("music_title"))
+    with_mentions = sum(1 for i in items if i.get("mentions"))
+    with_hashtags = sum(1 for i in items if i.get("hashtags"))
+    with_links = sum(1 for i in items if i.get("link_stickers"))
+    with_polls = sum(1 for i in items if i.get("polls"))
+    with_linked = sum(1 for i in items if i.get("linked_post_code"))
+    paid = sum(1 for i in items if i.get("is_paid_partnership"))
+
+    lines += [
+        "",
+        f"**🖼** {images}  |  **🎬** {videos}  |  **🎵** {with_music}  |  "
+        f"**👥** {with_mentions}  |  **#️⃣** {with_hashtags}  |  **🔗** {with_links}  |  "
+        f"**📊** {with_polls}  |  **📎** {with_linked}  |  **💼** {paid}",
+        "",
+        "---",
+        "*Data: Instagram /api/v1/feed/user/{pk}/story/ — authenticated session. Stories cached 2 min.*",
+    ]
+    return "\n".join(lines)
+
+
+def format_highlights_markdown(
+    username: str,
+    highlights: list,
+    highlight_count: int,
+    is_verified: bool = False,
+) -> str:
+    """Format Highlights tray (and optionally media items) as structured Markdown."""
+    tick = " ✅" if is_verified else ""
+    lines = [f"# 🎭 Highlights — @{username}{tick}", ""]
+
+    lines.append(f"**{highlight_count} highlights**")
+    lines.append("")
+
+    if not highlights:
+        lines.append("*No highlights found.*")
+        return "\n".join(lines)
+
+    # Tray table
+    lines += [
+        "| # | 📌 | Title | Stories | Created | Updated |",
+        "|---|-------|-------|--------:|---------|---------|",
+    ]
+    for i, h in enumerate(highlights, 1):
+        pinned = "📌" if h.get("is_pinned") else ""
+        arch = " 🗄" if h.get("is_archived") else ""
+        title = f"`{h.get('title', '')}`{arch}"
+        media_count = h.get("media_count", 0)
+        created = h.get("created_at_str", "")
+        latest = h.get("latest_reel_media", 0)
+        try:
+            updated = _dt.fromtimestamp(latest, tz=_tz.utc).strftime("%Y-%m-%d") if latest else "—"
+        except Exception:
+            updated = "—"
+        lines.append(f"| {i} | {pinned} | {title} | {media_count} | {created} | {updated} |")
+
+    # Per-highlight media sub-sections (if items were fetched)
+    highlights_with_items = [h for h in highlights if h.get("items")]
+    if highlights_with_items:
+        for h in highlights_with_items:
+            items = h.get("items") or []
+            lines.append("")
+            lines.append(f"### \"{h.get('title', '')}\" — {h.get('media_count', 0)} stories")
+            lines.append("")
+            lines += [
+                "| # | Type | Time | Duration | Capture | Cam | 👥 | 🔗 | 📊 |",
+                "|---|------|------|----------|---------|-----|----|----|----|",
+            ]
+            for j, item in enumerate(items, 1):
+                mtype = item.get("media_type", 1)
+                type_icon = "🎬" if mtype == 2 else "🖼"
+                taken = item.get("taken_at_str", "—")
+                dur_secs = item.get("duration_secs") or 0.0
+                dur = f"{int(dur_secs)}s" if mtype == 2 else "—"
+
+                capture = item.get("capture_type", "") or "—"
+                cam = item.get("camera_facing", "") or "—"
+
+                mentions = item.get("mentions") or []
+                mention_cell = " ".join(f"@{m}" for m in mentions[:3]) if mentions else "—"
+
+                link_stickers = item.get("link_stickers") or []
+                if link_stickers:
+                    ls = link_stickers[0]
+                    disp = ls.get("display_url", "") or ls.get("url", "")
+                    link_cell = f"[{disp[:20]}]({ls.get('url', '')})" if disp else "🔗"
+                else:
+                    link_cell = "—"
+
+                polls = item.get("polls") or []
+                if polls:
+                    p = polls[0]
+                    tallies = p.get("tallies", [])
+                    total = sum(t.get("count", 0) for t in tallies)
+                    poll_cell = f"📊{total}" if total else "📊"
+                else:
+                    poll_cell = "—"
+
+                lines.append(
+                    f"| {j} | {type_icon} | {taken} | {dur} | {capture} | {cam} | {mention_cell} | {link_cell} | {poll_cell} |"
+                )
+
+    # Summary stats
+    lines.append("")
+    total_stories = sum(h.get("media_count", 0) for h in highlights)
+    lines.append(f"Total stories across all highlights: {total_stories}")
+
+    if highlights_with_items:
+        all_items = [item for h in highlights_with_items for item in (h.get("items") or [])]
+        if all_items:
+            images = sum(1 for i in all_items if i.get("media_type") == 1)
+            videos = sum(1 for i in all_items if i.get("media_type") == 2)
+            boomerangs = sum(1 for i in all_items if i.get("capture_type") == "boomerang")
+            selfies = sum(1 for i in all_items if i.get("camera_facing") == "front")
+            with_mentions = sum(1 for i in all_items if i.get("mentions"))
+            with_links = sum(1 for i in all_items if i.get("link_stickers"))
+            lines.append(
+                f"**🖼** {images}  |  **🎬** {videos}  |  **🔄 Boomerang:** {boomerangs}  |  "
+                f"**🤳 Selfie:** {selfies}  |  **👥** {with_mentions}  |  **🔗** {with_links}"
+            )
+
+    return "\n".join(lines)
+
+
+def format_post_likers_markdown(
+    shortcode: str,
+    users: list,
+    user_count: int,
+) -> str:
+    _fmt = format_followers
+    lines = [
+        f"# Post Likers — [{shortcode}](https://www.instagram.com/p/{shortcode}/)",
+        "",
+        f"**Total likes:** {_fmt(user_count)}  |  **Shown here:** {len(users)}",
+        "",
+    ]
+
+    if not users:
+        lines += ["*No likers found or post is private.*"]
+        return "\n".join(lines)
+
+    lines += [
+        "| # | Username | Full Name | ✓ | 🔒 | Relation | 🎬 |",
+        "|---|----------|-----------|---|----|-----------|----|",
+    ]
+    for i, u in enumerate(users, 1):
+        lines.append(_follow_user_row(i, u))
+
+    verified_count  = sum(1 for u in users if u.get("is_verified"))
+    you_follow      = sum(1 for u in users if u.get("you_follow_them"))
+    they_follow     = sum(1 for u in users if u.get("they_follow_you"))
+    lines += [
+        "",
+        f"**Verified likers:** {verified_count}  |  **You follow:** {you_follow}  |  **Follow you:** {they_follow}",
+        "",
+        "---",
+        "*Data: Instagram /api/v1/media/{id}/likers/ — authenticated session. ~98 likers returned (Instagram API limit).*",
+    ]
+    return "\n".join(lines)
+
+
+def format_location_posts_markdown(
+    location_id: str,
+    location_name: str,
+    posts: list,
+    post_count: int,
+    more_available: bool,
+) -> str:
+    """Format location top-posts result as readable Markdown."""
+    _fmt = format_followers
+
+    display_name = location_name or location_id
+    lines = [
+        f"# \U0001f4cd Location Posts — {display_name}",
+        "",
+        f"**Location ID:** `{location_id}`  |  **Posts shown:** {post_count}",
+        "",
+    ]
+
+    if not posts:
+        lines.append("*No posts found for this location.*")
+        return "\n".join(lines)
+
+    lines += [
+        "| # | Type | User | ✔ | ❤ Likes | \U0001f4ac Comments | \U0001f441 Plays | Caption |",
+        "|---|------|------|---|---------|----------|-------|---------|",
+    ]
+    for i, post in enumerate(posts, 1):
+        mtype = post.get("media_type", 1)
+        if mtype == 2:
+            type_icon = "\U0001f3ac"
+        elif mtype == 8:
+            type_icon = "\U0001f3a0"
+        else:
+            type_icon = "\U0001f5bc"
+        username   = post.get("username", "")
+        verified   = "✔" if post.get("is_verified") else ""
+        likes      = _fmt(post.get("like_count") or 0)
+        comments   = _fmt(post.get("comment_count") or 0)
+        plays      = _fmt(post.get("play_count") or 0) if post.get("play_count") else "—"
+        code       = post.get("shortcode", "")
+        cap_raw    = post.get("caption", "") or ""
+        caption    = cap_raw[:55].replace("|", "\\|").replace("\n", " ")
+        if len(cap_raw) > 55:
+            caption += "…"
+        lines.append(
+            f"| {i} | {type_icon} | [@{username}](https://www.instagram.com/{username}/) "
+            f"| {verified} | {likes} | {comments} | {plays} "
+            f"| [{caption}](https://www.instagram.com/p/{code}/) |"
+        )
+
+    if more_available:
+        lines += ["", "*More posts available — increase `max_posts` to fetch more.*"]
+
+    # Summary stats
+    if posts:
+        videos    = sum(1 for p in posts if p.get("media_type") == 2)
+        carousels = sum(1 for p in posts if p.get("media_type") == 8)
+        images    = sum(1 for p in posts if p.get("media_type") == 1)
+        verified_count = sum(1 for p in posts if p.get("is_verified"))
+        lines += [
+            "",
+            "## Summary",
+            "",
+            f"- \U0001f3ac Videos: {videos}  |  \U0001f3a0 Carousels: {carousels}  |  \U0001f5bc Photos: {images}",
+            f"- ✔ Verified creators: {verified_count}",
+        ]
+
+    return "\n".join(lines)
+
+
+def format_audio_reels_markdown(
+    audio_cluster_id: str,
+    music_title: str,
+    music_artist: str,
+    posts: list,
+    total_reels_str: str,
+    more_available: bool,
+) -> str:
+    """Format audio reels result as readable Markdown."""
+    _fmt = format_followers
+
+    title_display  = music_title or audio_cluster_id
+    artist_display = music_artist or "Unknown"
+    lines = [
+        f"# \U0001f3b5 Audio Reels — {title_display} by {artist_display}",
+        "",
+    ]
+    if total_reels_str:
+        lines.append(f"**Total reels using this audio:** {total_reels_str}  |  **Shown here:** {len(posts)}")
+    else:
+        lines.append(f"**Reels shown:** {len(posts)}")
+    lines.append(f"**Audio cluster ID:** `{audio_cluster_id}`")
+    lines.append("")
+
+    if not posts:
+        lines.append("*No reels found for this audio.*")
+        return "\n".join(lines)
+
+    lines += [
+        "| # | User | ✔ | ❤ Likes | \U0001f441 Plays | Date | Caption |",
+        "|---|------|---|---------|-------|------|---------|",
+    ]
+    for i, post in enumerate(posts, 1):
+        username  = post.get("username", "")
+        verified  = "✔" if post.get("is_verified") else ""
+        likes     = _fmt(post.get("like_count") or 0)
+        plays     = _fmt(post.get("play_count") or 0) if post.get("play_count") else "—"
+        date      = (post.get("taken_at_str", "") or "")[:10]
+        code      = post.get("shortcode", "")
+        cap_raw   = post.get("caption", "") or ""
+        caption   = cap_raw[:55].replace("|", "\\|").replace("\n", " ")
+        if len(cap_raw) > 55:
+            caption += "…"
+        lines.append(
+            f"| {i} | [@{username}](https://www.instagram.com/{username}/) "
+            f"| {verified} | {likes} | {plays} | {date} "
+            f"| [{caption}](https://www.instagram.com/reel/{code}/) |"
+        )
+
+    if more_available:
+        lines += ["", "*More reels available — increase `max_reels` to fetch more.*"]
+
+    # Summary stats
+    if posts:
+        verified_count = sum(1 for p in posts if p.get("is_verified"))
+        total_likes    = sum(p.get("like_count") or 0 for p in posts)
+        total_plays    = sum(p.get("play_count") or 0 for p in posts)
+        lines += [
+            "",
+            "## Summary",
+            "",
+            f"- ✔ Verified creators: {verified_count}",
+            f"- ❤ Total likes: {_fmt(total_likes)}  |  \U0001f441 Total plays: {_fmt(total_plays)}",
+        ]
 
     return "\n".join(lines)

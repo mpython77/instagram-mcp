@@ -23,6 +23,8 @@ from instagram_mcp.models import (
     ProfileInput, DeepFeedInput, EngagementAnalysisInput, CollabNetworkInput,
     CompareProfilesInput, BulkProfilesInput, PostInput, ReelsInput,
     RepostsInput, ServerInput, TaggedByInput, PostCommentsInput,
+    HashtagInput, SearchInput, FollowersInput, FollowingInput, PostLikersInput,
+    StoriesInput, HighlightsInput, LocationPostsInput, AudioReelsInput,
     CacheStats, PostInfo
 )
 from instagram_mcp.exceptions import InstagramMCPError
@@ -41,6 +43,15 @@ def mock_client():
     client.fetch_reposts_paginated = AsyncMock()
     client.fetch_reels_paginated = AsyncMock()
     client.fetch_comments_paginated = AsyncMock()
+    client.fetch_hashtag = AsyncMock()
+    client.fetch_search = AsyncMock()
+    client.fetch_followers = AsyncMock()
+    client.fetch_following = AsyncMock()
+    client.fetch_post_likers = AsyncMock()
+    client.fetch_stories = AsyncMock()
+    client.fetch_highlights = AsyncMock()
+    client.fetch_location_posts = AsyncMock()
+    client.fetch_audio_reels = AsyncMock()
     client.cache = MagicMock()
     client.cache.stats = AsyncMock()
     client.cache.clear = AsyncMock()
@@ -78,19 +89,27 @@ def mock_ctx():
     return ctx
 
 @pytest.fixture
-def tools(mock_client, mock_config):
+def mock_exporter():
+    from instagram_mcp.exporter import JsonExporter
+    exp = MagicMock(spec=JsonExporter)
+    exp.save = AsyncMock(return_value=None)
+    exp.enabled = False
+    return exp
+
+@pytest.fixture
+def tools(mock_client, mock_config, mock_exporter):
     mcp_tools = {}
     mcp = MagicMock(spec=FastMCP)
-    
+
     def tool_decorator(*args, **kwargs):
         def decorator(f):
             name = kwargs.get("name") or f.__name__
             mcp_tools[name] = f
             return f
         return decorator
-    
+
     mcp.tool = tool_decorator
-    register_tools(mcp, mock_client, mock_config)
+    register_tools(mcp, mock_client, mock_config, mock_exporter)
     return mcp_tools
 
 def test_sanitize_username():
@@ -327,3 +346,396 @@ async def test_instagram_post_comments(tools, mock_client, mock_ctx):
     result = await tools["instagram_post_comments"](params, mock_ctx)
     assert "Comments" in result
     assert "commenter" in result
+
+@pytest.mark.asyncio
+async def test_instagram_hashtag_basic(tools, mock_client, mock_ctx):
+    mock_client.fetch_hashtag.return_value = {
+        "tag": "football",
+        "posts": [
+            {
+                "node": {
+                    "__typename": "XIGPolarisVideoMedia",
+                    "code": "DXUoQBqiCrY",
+                    "play_count": 20820894,
+                    "user": {"username": "inovinate", "is_verified": True},
+                    "caption": {"text": "Amazing football highlights #football"},
+                }
+            }
+        ],
+        "has_more": True,
+        "related_searches": ["football skills", "football highlights"],
+    }
+    params = HashtagInput(tag="football")
+    result = await tools["instagram_hashtag"](params, mock_ctx)
+    assert "football" in result
+    assert "inovinate" in result
+    assert "DXUoQBqiCrY" in result
+
+@pytest.mark.asyncio
+async def test_instagram_hashtag_not_found(tools, mock_client, mock_ctx):
+    mock_client.fetch_hashtag.return_value = None
+    params = HashtagInput(tag="xyznonexistent999")
+    result = await tools["instagram_hashtag"](params, mock_ctx)
+    assert "not found" in result.lower() or "xyznonexistent999" in result
+
+@pytest.mark.asyncio
+async def test_instagram_hashtag_error(tools, mock_client, mock_ctx):
+    mock_client.fetch_hashtag.side_effect = Exception("Network error")
+    params = HashtagInput(tag="football")
+    with pytest.raises(ToolError):
+        await tools["instagram_hashtag"](params, mock_ctx)
+
+@pytest.mark.asyncio
+async def test_instagram_search_basic(tools, mock_client, mock_ctx):
+    mock_client.fetch_search.return_value = {
+        "query": "cristiano",
+        "context": "blended",
+        "users": [
+            {
+                "position": 0,
+                "pk": "173560420",
+                "username": "cristiano",
+                "full_name": "Cristiano Ronaldo",
+                "is_verified": True,
+                "is_private": False,
+                "follower_count_text": "664M followers",
+                "you_follow_them": True,
+                "they_follow_you": False,
+                "has_recent_reel": False,
+            }
+        ],
+        "hashtags": [
+            {
+                "position": 0,
+                "id": "12345",
+                "name": "cristiano",
+                "media_count": 9114743,
+                "subtitle": "9.1M posts",
+            }
+        ],
+        "has_more": True,
+    }
+    params = SearchInput(query="cristiano")
+    result = await tools["instagram_search"](params, mock_ctx)
+    assert "cristiano" in result
+    assert "Cristiano Ronaldo" in result
+    assert "664M" in result
+    assert "9.1M posts" in result
+
+@pytest.mark.asyncio
+async def test_instagram_search_no_auth(tools, mock_client, mock_ctx):
+    mock_client.fetch_search.return_value = None
+    params = SearchInput(query="nike")
+    result = await tools["instagram_search"](params, mock_ctx)
+    assert "auth" in result.lower() or "401" in result
+
+@pytest.mark.asyncio
+async def test_instagram_search_error(tools, mock_client, mock_ctx):
+    mock_client.fetch_search.side_effect = Exception("Network error")
+    params = SearchInput(query="nike")
+    with pytest.raises(ToolError):
+        await tools["instagram_search"](params, mock_ctx)
+
+_SAMPLE_FOLLOW_USER = {
+    "pk": "123", "username": "testuser", "full_name": "Test User",
+    "is_verified": True, "is_private": False, "profile_pic_url": "",
+    "has_recent_reel": True, "latest_reel_ts": 1700000000,
+    "you_follow_them": True, "they_follow_you": False,
+    "follow_req_sent": False, "is_bestie": False, "is_muting": False, "is_blocking": False,
+}
+
+@pytest.mark.asyncio
+async def test_instagram_followers_list_basic(tools, mock_client, mock_ctx):
+    mock_client.fetch_user.return_value = {"pk": "20269764", "username": "adidas"}
+    mock_client.fetch_followers.return_value = {
+        "user_pk": "20269764",
+        "users": [_SAMPLE_FOLLOW_USER],
+        "has_more": False,
+        "should_limit": True,
+        "big_list": False,
+        "page_size": 1,
+    }
+    params = FollowersInput(username="adidas")
+    result = await tools["instagram_followers_list"](params, mock_ctx)
+    assert "adidas" in result
+    assert "testuser" in result
+    assert "⚠️" in result  # should_limit warning
+
+@pytest.mark.asyncio
+async def test_instagram_followers_list_no_auth(tools, mock_client, mock_ctx):
+    mock_client.fetch_user.return_value = {"pk": "123", "username": "adidas"}
+    mock_client.fetch_followers.return_value = None
+    params = FollowersInput(username="adidas")
+    result = await tools["instagram_followers_list"](params, mock_ctx)
+    assert "auth" in result.lower()
+
+@pytest.mark.asyncio
+async def test_instagram_followers_list_error(tools, mock_client, mock_ctx):
+    mock_client.fetch_user.return_value = {"pk": "123", "username": "adidas"}
+    mock_client.fetch_followers.side_effect = Exception("Network error")
+    params = FollowersInput(username="adidas")
+    with pytest.raises(ToolError):
+        await tools["instagram_followers_list"](params, mock_ctx)
+
+@pytest.mark.asyncio
+async def test_instagram_following_list_basic(tools, mock_client, mock_ctx):
+    mock_client.fetch_user.return_value = {"pk": "20269764", "username": "adidas"}
+    mock_client.fetch_following.return_value = {
+        "user_pk": "20269764",
+        "users": [{**_SAMPLE_FOLLOW_USER, "is_favorite": True}],
+        "has_more": True,
+        "pages_fetched": 4,
+    }
+    params = FollowingInput(username="adidas", max_users=200)
+    result = await tools["instagram_following_list"](params, mock_ctx)
+    assert "adidas" in result
+    assert "testuser" in result
+    assert "⭐" in result
+
+@pytest.mark.asyncio
+async def test_instagram_following_list_no_auth(tools, mock_client, mock_ctx):
+    mock_client.fetch_user.return_value = {"pk": "123", "username": "adidas"}
+    mock_client.fetch_following.return_value = None
+    params = FollowingInput(username="adidas")
+    result = await tools["instagram_following_list"](params, mock_ctx)
+    assert "auth" in result.lower()
+
+@pytest.mark.asyncio
+async def test_instagram_following_list_error(tools, mock_client, mock_ctx):
+    mock_client.fetch_user.return_value = {"pk": "123", "username": "adidas"}
+    mock_client.fetch_following.side_effect = Exception("Network error")
+    params = FollowingInput(username="adidas")
+    with pytest.raises(ToolError):
+        await tools["instagram_following_list"](params, mock_ctx)
+
+@pytest.mark.asyncio
+async def test_instagram_post_likers_basic(tools, mock_client, mock_ctx):
+    mock_client.fetch_post_likers.return_value = {
+        "shortcode": "DXUoQBqiCrY",
+        "media_id": "3878902202232220376",
+        "users": [_SAMPLE_FOLLOW_USER],
+        "user_count": 1671287,
+    }
+    params = PostLikersInput(post="DXUoQBqiCrY")
+    result = await tools["instagram_post_likers"](params, mock_ctx)
+    assert "DXUoQBqiCrY" in result
+    assert "testuser" in result
+    assert "1.7M" in result or "1671" in result
+
+@pytest.mark.asyncio
+async def test_instagram_post_likers_no_auth(tools, mock_client, mock_ctx):
+    mock_client.fetch_post_likers.return_value = None
+    params = PostLikersInput(post="DXUoQBqiCrY")
+    result = await tools["instagram_post_likers"](params, mock_ctx)
+    assert "auth" in result.lower()
+
+@pytest.mark.asyncio
+async def test_instagram_post_likers_error(tools, mock_client, mock_ctx):
+    mock_client.fetch_post_likers.side_effect = Exception("Not found")
+    params = PostLikersInput(post="DXUoQBqiCrY")
+    with pytest.raises(ToolError):
+        await tools["instagram_post_likers"](params, mock_ctx)
+
+
+_SAMPLE_STORY_ITEM = {
+    "pk": "3897791644182935799",
+    "shortcode": "DYXvNlYAnj3",
+    "taken_at": 1778872993,
+    "taken_at_str": "2026-05-15 10:23",
+    "expiring_at": 1778959393,
+    "media_type": 1,
+    "duration_secs": 0.0,
+    "width": 1170,
+    "height": 2080,
+    "thumbnail_url": "https://example.com/story.jpg",
+    "caption": "",
+    "accessibility_caption": "Photo by Cristiano Ronaldo",
+    "is_paid_partnership": False,
+    "can_reshare": True,
+    "can_reply": False,
+    "has_audio": False,
+    "mentions": ["someuser"],
+    "hashtags": [],
+    "linked_post_code": "",
+    "music_title": "",
+    "music_artist": "",
+}
+
+
+@pytest.mark.asyncio
+async def test_instagram_stories_basic(tools, mock_client, mock_ctx):
+    mock_client.fetch_stories.return_value = {
+        "username": "cristiano",
+        "user_pk": "173560420",
+        "story_count": 1,
+        "expiring_at": 1778959393,
+        "can_reply": False,
+        "can_reshare": True,
+        "is_verified": True,
+        "items": [_SAMPLE_STORY_ITEM],
+    }
+    params = StoriesInput(username="cristiano")
+    result = await tools["instagram_stories"](params, mock_ctx)
+    assert "@cristiano" in result
+    assert "Stories" in result
+
+
+@pytest.mark.asyncio
+async def test_instagram_stories_no_auth(tools, mock_client, mock_ctx):
+    mock_client.fetch_stories.return_value = None
+    params = StoriesInput(username="cristiano")
+    with pytest.raises(ToolError):
+        await tools["instagram_stories"](params, mock_ctx)
+
+
+@pytest.mark.asyncio
+async def test_instagram_stories_error(tools, mock_client, mock_ctx):
+    mock_client.fetch_stories.side_effect = Exception("stories HTTP 403")
+    params = StoriesInput(username="cristiano")
+    with pytest.raises(ToolError):
+        await tools["instagram_stories"](params, mock_ctx)
+
+
+_SAMPLE_HIGHLIGHT = {
+    "id": "highlight:18137625565499186",
+    "title": "Travel",
+    "media_count": 12,
+    "created_at": 1772641522,
+    "created_at_str": "2026-02-01",
+    "updated_at": 1772816304,
+    "is_pinned": False,
+    "can_reply": False,
+    "can_reshare": True,
+    "cover_url": "https://example.com/cover.jpg",
+    "items": [],
+}
+
+
+@pytest.mark.asyncio
+async def test_instagram_highlights_basic(tools, mock_client, mock_ctx):
+    mock_client.fetch_highlights.return_value = {
+        "username": "iamjasyra",
+        "user_pk": "403019875",
+        "is_verified": False,
+        "highlight_count": 1,
+        "highlights": [_SAMPLE_HIGHLIGHT],
+    }
+    params = HighlightsInput(username="iamjasyra")
+    result = await tools["instagram_highlights"](params, mock_ctx)
+    assert "@iamjasyra" in result
+    assert "Highlights" in result
+
+
+@pytest.mark.asyncio
+async def test_instagram_highlights_no_auth(tools, mock_client, mock_ctx):
+    mock_client.fetch_highlights.return_value = None
+    params = HighlightsInput(username="iamjasyra")
+    with pytest.raises(ToolError):
+        await tools["instagram_highlights"](params, mock_ctx)
+
+
+@pytest.mark.asyncio
+async def test_instagram_highlights_error(tools, mock_client, mock_ctx):
+    mock_client.fetch_highlights.side_effect = Exception("highlights HTTP 401")
+    params = HighlightsInput(username="iamjasyra")
+    with pytest.raises(ToolError):
+        await tools["instagram_highlights"](params, mock_ctx)
+
+
+# ── Location Posts ─────────────────────────────────────────────────────────────
+
+_SAMPLE_LOCATION_POST = {
+    "shortcode": "DXabc123",
+    "media_type": 1,
+    "like_count": 150,
+    "comment_count": 12,
+    "play_count": 0,
+    "taken_at": 1748000000,
+    "taken_at_str": "2025-05-23 10:00 UTC",
+    "username": "testuser",
+    "full_name": "Test User",
+    "is_verified": False,
+    "caption": "Beautiful place!",
+    "location_name": "Tashkent",
+}
+
+
+@pytest.mark.asyncio
+async def test_instagram_location_posts_basic(tools, mock_client, mock_ctx):
+    mock_client.fetch_location_posts.return_value = {
+        "location_id": "213385402",
+        "location_name": "Tashkent",
+        "posts": [_SAMPLE_LOCATION_POST],
+        "post_count": 1,
+        "more_available": False,
+    }
+    params = LocationPostsInput(location_name="Tashkent")
+    result = await tools["instagram_location_posts"](params, mock_ctx)
+    assert "Tashkent" in result
+    assert "Location Posts" in result
+
+
+@pytest.mark.asyncio
+async def test_instagram_location_posts_no_auth(tools, mock_client, mock_ctx):
+    mock_client.fetch_location_posts.return_value = None
+    params = LocationPostsInput(location_id="213385402")
+    with pytest.raises(ToolError):
+        await tools["instagram_location_posts"](params, mock_ctx)
+
+
+@pytest.mark.asyncio
+async def test_instagram_location_posts_error(tools, mock_client, mock_ctx):
+    mock_client.fetch_location_posts.side_effect = Exception("location_posts HTTP 401")
+    params = LocationPostsInput(location_id="213385402")
+    with pytest.raises(ToolError):
+        await tools["instagram_location_posts"](params, mock_ctx)
+
+
+# ── Audio Reels ────────────────────────────────────────────────────────────────
+
+_SAMPLE_AUDIO_REEL = {
+    "shortcode": "DXreel456",
+    "media_type": 2,
+    "like_count": 2500,
+    "comment_count": 80,
+    "play_count": 45000,
+    "taken_at": 1748100000,
+    "taken_at_str": "2025-05-24 08:00 UTC",
+    "username": "reelcreator",
+    "full_name": "Reel Creator",
+    "is_verified": True,
+    "caption": "This beat goes hard!",
+    "location_name": "",
+}
+
+
+@pytest.mark.asyncio
+async def test_instagram_audio_reels_basic(tools, mock_client, mock_ctx):
+    mock_client.fetch_audio_reels.return_value = {
+        "audio_cluster_id": "260841894490983",
+        "music_title": "Blinding Lights",
+        "music_artist": "The Weeknd",
+        "total_reels_str": "3.2M",
+        "posts": [_SAMPLE_AUDIO_REEL],
+        "more_available": False,
+    }
+    params = AudioReelsInput(audio_cluster_id="260841894490983")
+    result = await tools["instagram_audio_reels"](params, mock_ctx)
+    assert "Audio Reels" in result
+    assert "Blinding Lights" in result
+
+
+@pytest.mark.asyncio
+async def test_instagram_audio_reels_no_auth(tools, mock_client, mock_ctx):
+    mock_client.fetch_audio_reels.return_value = None
+    params = AudioReelsInput(audio_cluster_id="260841894490983")
+    with pytest.raises(ToolError):
+        await tools["instagram_audio_reels"](params, mock_ctx)
+
+
+@pytest.mark.asyncio
+async def test_instagram_audio_reels_error(tools, mock_client, mock_ctx):
+    mock_client.fetch_audio_reels.side_effect = Exception("audio_reels HTTP 401")
+    params = AudioReelsInput(audio_cluster_id="260841894490983")
+    with pytest.raises(ToolError):
+        await tools["instagram_audio_reels"](params, mock_ctx)
