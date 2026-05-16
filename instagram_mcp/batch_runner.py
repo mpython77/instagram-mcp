@@ -67,7 +67,8 @@ def _parse_date(date_str: str) -> Optional[int]:
     if not date_str:
         return None
     try:
-        return int(datetime.strptime(date_str.strip().replace(",", "."), "%d.%m.%Y").timestamp())
+        from datetime import timezone as _tz
+        return int(datetime.strptime(date_str.strip().replace(",", "."), "%d.%m.%Y").replace(tzinfo=_tz.utc).timestamp())
     except ValueError:
         return None
 

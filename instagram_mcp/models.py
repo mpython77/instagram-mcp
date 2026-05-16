@@ -48,7 +48,8 @@ def _parse_user_date(s: str) -> Optional[int]:
         fmts = ["%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"]
     for fmt in fmts:
         try:
-            return int(datetime.strptime(s, fmt).timestamp())
+            from datetime import timezone as _tz
+            return int(datetime.strptime(s, fmt).replace(tzinfo=_tz.utc).timestamp())
         except ValueError:
             continue
     raise ValueError(
@@ -972,9 +973,10 @@ class ServerInput(BaseModel):
         default="status",
         description=(
             "Action to perform:\n"
-            "  'status'      — show cache hit rate, proxy health, rate limiter state\n"
-            "  'clear_cache' — flush ALL cached profiles and feeds (full reset)\n"
-            "  'clear_user'  — flush cache for ONE user only (provide username=)"
+            "  'status'         — show cache hit rate, proxy health, rate limiter state\n"
+            "  'clear_cache'    — flush ALL cached profiles and feeds (full reset)\n"
+            "  'clear_user'     — flush cache for ONE user only (provide username=)\n"
+            "  'reload_cookies' — reload cookies.txt/cookies.json from disk without restarting"
         ),
     )
     username: str = Field(
@@ -1390,3 +1392,75 @@ class AccountReportInput(BaseModel):
         if not v:
             raise ValueError("username must not be empty")
         return v
+
+
+class DownloadInput(BaseModel):
+    """Input for instagram_download tool (🔐 auth required)."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    post: str = Field(
+        ...,
+        description=(
+            "Instagram post shortcode or full URL. Supports all post types "
+            "(image, video/reel, carousel). Examples:\n"
+            "  'DXjuqH9nDVE'\n"
+            "  'https://www.instagram.com/p/DXjuqH9nDVE/'\n"
+            "  'https://www.instagram.com/reel/DXjuqH9nDVE/'"
+        ),
+        min_length=5,
+    )
+    save_dir: str = Field(
+        default="/tmp",
+        description=(
+            "Absolute directory path where files will be saved. "
+            "Default is /tmp. Directory must already exist."
+        ),
+    )
+
+    @field_validator("post")
+    @classmethod
+    def extract_shortcode(cls, v: str) -> str:
+        v = v.strip()
+        m = re.search(r'/(?:p|reel|tv)/([A-Za-z0-9_\-]+)', v)
+        if m:
+            return m.group(1)
+        if re.match(r'^[A-Za-z0-9_\-]{5,15}$', v):
+            return v
+        raise ValueError(f"Cannot extract a valid shortcode from: {v!r}")
+
+
+class UploadPhotoInput(BaseModel):
+    """Input for instagram_upload_photo tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    images: List[str] = Field(
+        ...,
+        min_length=1,
+        max_length=10,
+        description=(
+            "List of absolute local file paths to upload (1–10 images). "
+            "Supported formats: JPEG (.jpg/.jpeg) natively; PNG requires Pillow installed. "
+            "For carousel posts provide 2–10 paths. "
+            "Example: ['/tmp/photo.jpg'] or ['/tmp/img1.jpg', '/tmp/img2.jpg']"
+        ),
+    )
+    caption: str = Field(
+        default="",
+        max_length=2200,
+        description="Post caption (max 2200 characters). Supports @mentions and #hashtags.",
+    )
+    disable_comments: bool = Field(
+        default=False,
+        description="Disable comments on the post.",
+    )
+    hide_like_count: bool = Field(
+        default=False,
+        description="Hide the like count from viewers (owner can still see it).",
+    )
+    location_id: str = Field(
+        default="",
+        description=(
+            "Optional Instagram location ID to tag the post. "
+            "Get the ID from instagram_location_posts or from instagram_post details."
+        ),
+    )

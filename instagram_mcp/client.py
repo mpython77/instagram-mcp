@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
+import uuid
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse, urlunparse
 
@@ -1174,6 +1176,84 @@ class InstagramClient:
 
     # ── Single post (HTML scrape) ────────────────────────────────────────────
 
+    async def fetch_media_info(
+        self,
+        shortcode: str,
+        cache_ttl: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Fetch full media info for a single post via /api/v1/media/{id}/info/.
+
+        🔐 Requires authentication (cookies).
+        Returns the first 'item' dict from the API response, which includes:
+          - media_type (1=image, 2=video, 8=carousel)
+          - image_versions2.candidates[0].url  — best image URL
+          - video_url                           — present for media_type=2 slides
+          - carousel_media[]                    — present for media_type=8
+        Each carousel slide follows the same structure as a top-level item.
+
+        Raises:
+            FetchError: if auth is missing, post not found, or all retries fail.
+        """
+        from .parser import shortcode_to_media_id
+
+        cm = self._cookie_manager
+        if cm is None or not getattr(cm, "is_authenticated", False):
+            raise FetchError(
+                "instagram_download requires authentication. "
+                "Please set up cookies.txt with a valid Instagram session."
+            )
+
+        media_id = shortcode_to_media_id(shortcode)
+        cache_key = f"media_info:{media_id}"
+        ttl = cache_ttl if cache_ttl is not None else self._config.cache_profile_ttl
+
+        async def _do_fetch() -> Dict[str, Any]:
+            session = await self._get_auth_session()
+            csrf = cm.cookies.get("csrftoken", "") if cm else ""
+            url = f"https://i.instagram.com/api/v1/media/{media_id}/info/"
+            for attempt in range(3):
+                try:
+                    resp = await session.get(
+                        url,
+                        headers={
+                            "X-IG-App-ID": self._config.ig_app_id,
+                            "X-CSRFToken": csrf,
+                            "Accept": "application/json",
+                        },
+                    )
+                except Exception as exc:
+                    if attempt == 2:
+                        raise FetchError(f"media_info({shortcode}) request failed: {exc}") from exc
+                    await asyncio.sleep(1)
+                    continue
+
+                if resp.status_code == 404:
+                    raise FetchError(f"Post /{shortcode}/ not found — deleted, private, or invalid shortcode.")
+                if resp.status_code == 400:
+                    raise FetchError(f"Post /{shortcode}/ unavailable (HTTP 400) — may be private or deleted.")
+                if resp.status_code == 401:
+                    raise FetchError("Session expired. Re-export cookies.txt and restart the server.")
+                if resp.status_code != 200:
+                    if attempt == 2:
+                        raise FetchError(f"media_info({shortcode}): HTTP {resp.status_code}")
+                    await asyncio.sleep(1)
+                    continue
+
+                try:
+                    data = resp.json()
+                except (ValueError, TypeError) as exc:
+                    raise FetchError(f"media_info({shortcode}): non-JSON response") from exc
+
+                items = data.get("items") or []
+                if not items:
+                    raise FetchError(f"media_info({shortcode}): empty items list")
+                return items[0]
+
+            raise FetchError(f"media_info({shortcode}): all retries exhausted")
+
+        return await self._cache.get_or_fetch(cache_key, _do_fetch, ttl=ttl)
+
     async def fetch_post(
         self,
         shortcode: str,
@@ -1623,12 +1703,20 @@ class InstagramClient:
                             "dominant_color": ci.get("dominant_color") or "",
                         })
 
+                _taken_at = int(media.get("taken_at") or 0)
+                from datetime import datetime as _dt2, timezone as _tz2
+                _taken_at_str = (
+                    _dt2.fromtimestamp(_taken_at, tz=_tz2.utc).strftime("%Y-%m-%d %H:%M UTC")
+                    if _taken_at else ""
+                )
+
                 posts.append({
                     # Identity
                     "shortcode":    media.get("code", ""),
                     "url":          f"https://www.instagram.com/p/{media.get('code','')}/",
                     "pk":           str(media.get("pk", "")),
-                    "taken_at":     media.get("taken_at"),
+                    "taken_at":     _taken_at,
+                    "taken_at_str": _taken_at_str,
 
                     # Author
                     "username":     user.get("username", ""),
@@ -2777,6 +2865,362 @@ class InstagramClient:
             }
 
         return await self._cache.get_or_fetch(cache_key, _do_fetch, ttl=ttl)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # PHOTO UPLOAD
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def upload_photo(
+        self,
+        image_paths: List[str],
+        caption: str = "",
+        disable_comments: bool = False,
+        hide_like_count: bool = False,
+        location_id: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Upload 1–10 images as an Instagram post (single or carousel). Auth required.
+
+        Flow:
+          1. Read + validate each image (JPEG natively; PNG → JPEG via Pillow)
+          2. POST each image to www.instagram.com/rupload_igphoto/ to get upload_id
+          3. POST to /api/v1/media/configure/ (single) or configure_sidecar/ (carousel)
+
+        Returns:
+            dict with: ok, post_type, shortcode, url, media_id, caption, images_uploaded
+        Raises:
+            FetchError: not authenticated, file missing, upload or configure failed
+        """
+        cm = self._cookie_manager
+        if cm is None or not getattr(cm, "is_authenticated", False):
+            raise FetchError(
+                "Photo upload requires authentication. "
+                "Set up cookies.txt and restart the server."
+            )
+        if not image_paths:
+            raise FetchError("At least one image path is required.")
+        if len(image_paths) > 10:
+            raise FetchError("Maximum 10 images per post.")
+
+        session = await self._get_auth_session()
+        csrf = (cm.cookies.get("csrftoken", "") if cm else "") or ""
+        cookie_header = "; ".join(f"{k}={v}" for k, v in (cm.cookies if cm else {}).items())
+
+        is_carousel = len(image_paths) > 1
+        uploads: List[tuple] = []
+        for path in image_paths:
+            item = await self._upload_single_image(session, csrf, cookie_header, path, is_sidecar=is_carousel)
+            uploads.append(item)
+
+        if len(uploads) == 1:
+            return await self._configure_single(
+                session, csrf, uploads[0][0],
+                caption, disable_comments, hide_like_count, location_id,
+                cookie_header=cookie_header,
+            )
+        return await self._configure_carousel(
+            session, csrf, uploads,
+            caption, disable_comments, hide_like_count,
+            cookie_header=cookie_header,
+        )
+
+    async def _upload_single_image(
+        self,
+        session: Any,
+        csrf: str,
+        cookie_header: str,
+        path: str,
+        is_sidecar: bool = False,
+    ) -> tuple:
+        """Upload one image file, return (upload_id, width, height)."""
+        import os as _os
+        import time as _time_mod
+
+        if not _os.path.isfile(path):
+            raise FetchError(f"Image file not found: {path!r}")
+
+        with open(path, "rb") as fh:
+            raw_bytes = fh.read()
+
+        if not raw_bytes:
+            raise FetchError(f"Image file is empty: {path!r}")
+
+        jpeg_bytes, width, height = self._prepare_image(raw_bytes, path)
+
+        upload_id = str(int(time.time() * 1000)) + str(random.randint(100, 999))
+        content_len = len(jpeg_bytes)
+
+        rupload_params_dict: Dict[str, Any] = {
+            "upload_id":           upload_id,
+            "media_type":          "1",
+            "upload_media_height": str(height),
+            "upload_media_width":  str(width),
+            "xsharing_user_ids":   "[]",
+            "image_compression":   _json.dumps({
+                "lib_name":    "moz",
+                "lib_version": "3.1.m",
+                "quality":     "87",
+            }),
+        }
+        rupload_params = _json.dumps(rupload_params_dict)
+
+        # Use the web-compatible rupload endpoint
+        url = f"https://www.instagram.com/rupload_igphoto/{upload_id}"
+        headers = {
+            "User-Agent":                  self._config.ig_user_agent,
+            "X-Instagram-Rupload-Params":  rupload_params,
+            "Content-Type":                "image/jpeg",
+            "Content-Length":              str(content_len),
+            "X-Entity-Type":               "image/jpeg",
+            "X-Entity-Name":               f"instagram_photo_{upload_id}",
+            "X-Entity-Length":             str(content_len),
+            "Offset":                      "0",
+            "Accept-Encoding":             "gzip",
+            "x-ig-app-id":                 self._config.ig_app_id,
+            "Cookie":                      cookie_header,
+            "x-csrftoken":                 csrf,
+            "Origin":                      "https://www.instagram.com",
+            "Referer":                     "https://www.instagram.com/",
+        }
+
+        try:
+            resp = await session.post(url, data=jpeg_bytes, headers=headers, timeout=90)
+        except Exception as exc:
+            raise FetchError(f"rupload request failed for {path!r}: {exc}") from exc
+
+        if resp.status_code == 401:
+            raise FetchError("rupload 401 — session expired. Re-export cookies.txt.")
+        if resp.status_code == 429:
+            raise FetchError("rupload 429 — rate limited. Wait a moment and retry.")
+        if resp.status_code not in (200, 201):
+            raise FetchError(
+                f"rupload HTTP {resp.status_code} for {path!r}: {resp.text[:300]}"
+            )
+
+        try:
+            body = resp.json()
+        except Exception:
+            raise FetchError(f"rupload returned non-JSON: {resp.text[:200]}")
+
+        uid = str(body.get("upload_id") or "")
+        if not uid:
+            raise FetchError(f"rupload response missing upload_id: {body}")
+
+        return uid, width, height
+
+    async def _configure_single(
+        self,
+        session: Any,
+        csrf: str,
+        upload_id: str,
+        caption: str,
+        disable_comments: bool,
+        hide_like_count: bool,
+        location_id: str,
+        cookie_header: str = "",
+    ) -> Dict[str, Any]:
+        """POST /api/v1/media/configure/ to publish a single-image post."""
+        cm = self._cookie_manager
+        uid = (cm.cookies.get("ds_user_id", "") if cm else "") or ""
+        device_id = (cm.cookies.get("ig_did", "") if cm else "") or ""
+
+        payload: Dict[str, Any] = {
+            "upload_id":                     upload_id,
+            "caption":                       caption,
+            "source_type":                   "4",
+            "disable_comments":              "1" if disable_comments else "0",
+            "like_and_view_counts_disabled": "1" if hide_like_count else "0",
+        }
+        if uid:
+            payload["_uid"] = uid
+        if device_id:
+            payload["_uuid"] = device_id
+            payload["device_id"] = device_id
+        if location_id:
+            payload["location"] = _json.dumps({
+                "name":               "",
+                "facebook_places_id": location_id,
+            })
+
+        url = "https://www.instagram.com/api/v1/media/configure/"
+        return await self._post_configure(session, csrf, url, payload, "single", 1, cookie_header=cookie_header)
+
+    async def _configure_carousel(
+        self,
+        session: Any,
+        csrf: str,
+        uploads: List[tuple],
+        caption: str,
+        disable_comments: bool,
+        hide_like_count: bool,
+        cookie_header: str = "",
+    ) -> Dict[str, Any]:
+        """POST /api/v1/media/configure_sidecar/ to publish a carousel post."""
+        sidecar_id = str(int(time.time() * 1000))
+        client_sidecar_id = str(uuid.uuid4())
+
+        cm = self._cookie_manager
+        uid = (cm.cookies.get("ds_user_id", "") if cm else "") or ""
+        device_id = (cm.cookies.get("ig_did", "") if cm else "") or ""
+
+        children = [
+            {
+                "upload_id":          upload_id,
+                "source_type":        "4",
+                "timezone_offset":    "0",
+            }
+            for upload_id, w, h in uploads
+        ]
+        payload: Dict[str, Any] = {
+            "upload_id":                     sidecar_id,
+            "client_sidecar_id":             client_sidecar_id,
+            "caption":                       caption,
+            "source_type":                   "4",
+            "children_metadata":             children,
+        }
+        if uid:
+            payload["_uid"] = uid
+        if device_id:
+            payload["_uuid"] = device_id
+            payload["device_id"] = device_id
+
+        url = "https://www.instagram.com/api/v1/media/configure_sidecar/"
+        return await self._post_configure(session, csrf, url, payload, "carousel", len(uploads), cookie_header=cookie_header, as_json=True)
+
+    async def _post_configure(
+        self,
+        session: Any,
+        csrf: str,
+        url: str,
+        payload: Dict[str, Any],
+        post_type: str,
+        images_count: int,
+        cookie_header: str = "",
+        as_json: bool = False,
+    ) -> Dict[str, Any]:
+        """Common POST helper for configure endpoints."""
+        headers = {
+            "User-Agent":       self._config.ig_user_agent,
+            "Accept":           "*/*",
+            "Accept-Language":  "en-US,en;q=0.9",
+            "Origin":           "https://www.instagram.com",
+            "Referer":          "https://www.instagram.com/",
+            "x-ig-app-id":      self._config.ig_app_id,
+            "x-csrftoken":      csrf,
+            "X-Requested-With": "XMLHttpRequest",
+            "X-Instagram-AJAX": "1",
+        }
+        if as_json:
+            headers["Content-Type"] = "application/json"
+            data = _json.dumps(payload)
+        else:
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+            data = payload
+
+        if cookie_header:
+            headers["Cookie"] = cookie_header
+
+        try:
+            resp = await session.post(url, data=data, headers=headers, timeout=30)
+        except Exception as exc:
+            raise FetchError(f"configure request failed: {exc}") from exc
+
+        if resp.status_code == 400:
+            try:
+                body = resp.json()
+                msg = body.get("message") or body.get("error_title") or resp.text[:300]
+            except Exception:
+                msg = resp.text[:300]
+            raise FetchError(f"configure 400 — {msg}")
+        if resp.status_code == 401:
+            raise FetchError("configure 401 — session expired. Re-export cookies.txt.")
+        if resp.status_code == 429:
+            raise FetchError("configure 429 — rate limited. Wait a moment and retry.")
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"configure HTTP {resp.status_code}: {resp.text[:300]}")
+
+        try:
+            body = resp.json()
+        except Exception:
+            raise FetchError(f"configure returned non-JSON: {resp.text[:200]}")
+
+        media = body.get("media") or {}
+        code = str(media.get("code") or "")
+        media_id = str(media.get("pk") or media.get("id") or "")
+
+        return {
+            "ok":             True,
+            "post_type":      post_type,
+            "shortcode":      code,
+            "url":            f"https://www.instagram.com/p/{code}/" if code else "",
+            "media_id":       media_id,
+            "caption":        payload.get("caption", ""),
+            "images_uploaded": images_count,
+        }
+
+    @staticmethod
+    def _prepare_image(raw_bytes: bytes, path: str) -> tuple:
+        """
+        Validate and normalise image bytes to JPEG.
+
+        Returns (jpeg_bytes, width, height).
+        Accepts JPEG directly. Converts PNG (and other formats) via Pillow.
+        """
+        import struct as _struct
+
+        # JPEG: FF D8 FF
+        if raw_bytes[:3] == b"\xff\xd8\xff":
+            width, height = InstagramClient._jpeg_dimensions(raw_bytes)
+            return raw_bytes, width, height
+
+        # PNG: 89 50 4E 47  — read dimensions from IHDR chunk at bytes 16-24
+        is_png = raw_bytes[:8] == b"\x89PNG\r\n\x1a\n"
+        if is_png and len(raw_bytes) >= 24:
+            width  = _struct.unpack(">I", raw_bytes[16:20])[0]
+            height = _struct.unpack(">I", raw_bytes[20:24])[0]
+        else:
+            width = height = 0
+
+        # Convert to JPEG via Pillow
+        try:
+            from PIL import Image as _PILImage
+            import io as _io
+            img = _PILImage.open(_io.BytesIO(raw_bytes))
+            if width == 0:
+                width, height = img.size
+            img = img.convert("RGB")
+            out = _io.BytesIO()
+            img.save(out, format="JPEG", quality=87, optimize=True)
+            return out.getvalue(), width, height
+        except ImportError:
+            raise FetchError(
+                f"Image {path!r} is not a JPEG. "
+                "Install Pillow to support PNG and other formats: pip install Pillow"
+            )
+        except Exception as exc:
+            raise FetchError(f"Failed to convert image {path!r} to JPEG: {exc}") from exc
+
+    @staticmethod
+    def _jpeg_dimensions(data: bytes) -> tuple:
+        """Extract width and height from JPEG SOF markers."""
+        import struct as _struct
+        i = 2  # skip FF D8
+        while i + 8 < len(data):
+            if data[i] != 0xFF:
+                break
+            marker = data[i + 1]
+            if marker in (
+                0xC0, 0xC1, 0xC2, 0xC3,
+                0xC5, 0xC6, 0xC7,
+                0xC9, 0xCA, 0xCB,
+                0xCD, 0xCE, 0xCF,
+            ):
+                height = _struct.unpack(">H", data[i + 5:i + 7])[0]
+                width  = _struct.unpack(">H", data[i + 7:i + 9])[0]
+                return width, height
+            seg_len = _struct.unpack(">H", data[i + 2:i + 4])[0]
+            i += 2 + seg_len
+        return 1080, 1080  # safe fallback
 
     async def fetch_highlights(
         self,

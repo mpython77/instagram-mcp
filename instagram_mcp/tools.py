@@ -43,12 +43,13 @@ from pydantic import BaseModel, Field
 
 from .client import InstagramClient
 from .config import MCPConfig
-from .exceptions import InstagramMCPError
+from .exceptions import FetchError, InstagramMCPError
 from .exporter import JsonExporter
 from .formatter import (
     format_account_report_markdown,
     format_account_status_markdown,
     format_audio_reels_markdown,
+    format_upload_result_markdown,
     format_bulk_results_markdown,
     format_collab_network_markdown,
     format_compare_profiles_markdown,
@@ -79,6 +80,7 @@ from .formatter import (
 from .models import (
     AccountReportInput,
     AudioReelsInput,
+    UploadPhotoInput,
     BulkProfilesInput,
     CollabNetworkInput,
     CompareProfilesInput,
@@ -106,6 +108,7 @@ from .models import (
     ServerInput,
     StoriesInput,
     TaggedByInput,
+    DownloadInput,
 )
 from .parser import (
     check_dead_account,
@@ -976,10 +979,10 @@ def register_tools(
             raise _tool_error("All provided usernames are empty or invalid.", "validation_error", "Provide at least one valid username.")
 
         if params.since_date and params.until_date:
-            from datetime import datetime as _datetime
+            from datetime import datetime as _datetime, timezone as _timezone
             try:
-                _since_dt = _datetime.strptime(params.since_date.strip(), "%d.%m.%Y")
-                _until_dt = _datetime.strptime(params.until_date.strip(), "%d.%m.%Y")
+                _since_dt = _datetime.strptime(params.since_date.strip(), "%d.%m.%Y").replace(tzinfo=_timezone.utc)
+                _until_dt = _datetime.strptime(params.until_date.strip(), "%d.%m.%Y").replace(tzinfo=_timezone.utc)
             except ValueError as e:
                 raise _tool_error(
                     f"Invalid date format: {e}. Use DD.MM.YYYY (e.g. 01.03.2026).",
@@ -1164,11 +1167,29 @@ def register_tools(
             except Exception as e:
                 raise _tool_error(f"Cache clear failed for @{username_raw}: {e}", "internal_error")
 
+        elif action == "reload_cookies":
+            try:
+                cm = client.cookie_manager
+                if cm is None:
+                    return "⚠️ No CookieManager attached to this server instance."
+                ok = cm.load()
+                # Reset cached auth session so it's recreated with fresh cookies
+                async with client._auth_session_lock:
+                    if client._auth_session is not None:
+                        await client._auth_session.close()
+                        client._auth_session = None
+                if ok:
+                    return "✅ Cookies reloaded successfully — sessionid found, authenticated."
+                else:
+                    return "⚠️ Cookies reloaded but no valid sessionid found — check your cookies file."
+            except Exception as e:
+                raise _tool_error(f"Cookie reload failed: {e}", "internal_error")
+
         else:
             raise _tool_error(
-                f"Unknown action: '{params.action}'. Valid actions: 'status', 'clear_cache', 'clear_user'.",
+                f"Unknown action: '{params.action}'. Valid actions: 'status', 'clear_cache', 'clear_user', 'reload_cookies'.",
                 "validation_error",
-                "Set action to one of: 'status', 'clear_cache', 'clear_user'.",
+                "Set action to one of: 'status', 'clear_cache', 'clear_user', 'reload_cookies'.",
             )
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -2910,3 +2931,212 @@ def register_tools(
                 elapsed,
             )
             return out
+
+    # ── TOOL 25: instagram_upload_photo ───────────────────────────────────────
+    if _enabled("upload", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_upload_photo",
+            description=(
+                "🔐 Upload 1–10 images to Instagram as a post (single photo or carousel). "
+                "Requires authenticated session (cookies.txt). "
+                "Supports JPEG natively; PNG requires Pillow (pip install Pillow). "
+                "Returns the post URL and shortcode immediately after publishing."
+            ),
+            annotations={
+                "readOnlyHint":    False,
+                "destructiveHint": True,
+                "idempotentHint":  False,
+                "openWorldHint":   True,
+            },
+        )
+        async def instagram_upload_photo(params: UploadPhotoInput, ctx: Context) -> str:
+            _t0 = time.perf_counter()
+            n = len(params.images)
+            post_kind = "carousel" if n > 1 else "single photo"
+            await ctx.info(f"upload_photo — {n} image(s) → {post_kind}")
+            await ctx.report_progress(0.0, 1.0, message=f"Preparing {n} image(s)...")
+
+            try:
+                result = await client.upload_photo(
+                    image_paths=params.images,
+                    caption=params.caption,
+                    disable_comments=params.disable_comments,
+                    hide_like_count=params.hide_like_count,
+                    location_id=params.location_id,
+                )
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+            elapsed = time.perf_counter() - _t0
+            shortcode = result.get("shortcode", "")
+            post_url  = result.get("url", "")
+
+            await ctx.report_progress(1.0, 1.0, message="Published!")
+            await ctx.info(
+                f"upload_photo ✓ — {post_kind}, shortcode={shortcode!r}, {elapsed:.2f}s"
+            )
+            await exporter.save(
+                "upload_photo",
+                shortcode or "unknown",
+                result,
+                elapsed,
+            )
+            return format_upload_result_markdown(result, params.images)
+
+    # ── TOOL 26: instagram_download ───────────────────────────────────────────
+    if _enabled("download", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_download",
+            description=(
+                "🔐 Download all media from an Instagram post to a local directory. "
+                "Supports single images, videos/reels, and carousels (all slides). "
+                "Requires authenticated session (cookies.txt). "
+                "Returns the list of saved file paths and media info."
+            ),
+        )
+        async def instagram_download(params: DownloadInput, ctx: Context) -> str:
+            """
+            Download all media files from an Instagram post.
+
+            🔐 Requires cookies.txt with a valid Instagram session.
+
+            Fetches full media info via /api/v1/media/{id}/info/ then downloads
+            each file (image/video) from Instagram's CDN to save_dir.
+
+            Supports:
+              - Single image posts → saves 1 .jpg
+              - Video / Reel posts → saves 1 .mp4
+              - Carousel posts     → saves N .jpg/.mp4 files (one per slide)
+
+            Args:
+                params: post (shortcode or URL), save_dir (output directory)
+
+            Returns:
+                Markdown summary with file paths, sizes, and media info.
+            """
+            import os
+            import mimetypes
+            from curl_cffi.requests import AsyncSession as _CurlSession
+
+            _t0 = time.perf_counter()
+            shortcode = params.post
+            save_dir = params.save_dir.rstrip("/")
+
+            await ctx.info(f"instagram_download: {shortcode} → {save_dir}")
+
+            if not os.path.isdir(save_dir):
+                raise _tool_error(
+                    f"Directory does not exist: {save_dir!r}",
+                    "validation_error",
+                    "Provide an existing absolute directory path for save_dir.",
+                )
+
+            # ── 1. Fetch media info ──────────────────────────────────────────
+            await ctx.report_progress(0.1, 1.0, message="Fetching media info…")
+            try:
+                item = await client.fetch_media_info(shortcode)
+            except FetchError as exc:
+                raise _tool_error(str(exc), "fetch_error", "Check the shortcode and your session cookies.")
+
+            media_type = item.get("media_type", 0)  # 1=image, 2=video, 8=carousel
+
+            # ── 2. Collect (ext, url) pairs ─────────────────────────────────
+            def _best_image(node: dict) -> str:
+                iv2 = node.get("image_versions2") or {}
+                cands = iv2.get("candidates") or []
+                return cands[0]["url"] if cands else ""
+
+            def _best_video(node: dict) -> str:
+                # Try video_url first (older posts), then video_versions (reels/clips)
+                vurl = node.get("video_url", "")
+                if vurl:
+                    return vurl
+                versions = node.get("video_versions") or []
+                if versions:
+                    # versions are sorted by bandwidth desc; take highest quality
+                    return versions[0].get("url", "")
+                return ""
+
+            media_pairs: list = []  # [(ext, url), ...]
+            if media_type == 1:
+                url = _best_image(item)
+                if url:
+                    media_pairs.append(("jpg", url))
+            elif media_type == 2:
+                vurl = _best_video(item)
+                if vurl:
+                    media_pairs.append(("mp4", vurl))
+                else:
+                    url = _best_image(item)
+                    if url:
+                        media_pairs.append(("jpg", url))
+            elif media_type == 8:
+                for slide in item.get("carousel_media") or []:
+                    stype = slide.get("media_type", 1)
+                    if stype == 2:
+                        vurl = _best_video(slide)
+                        if vurl:
+                            media_pairs.append(("mp4", vurl))
+                            continue
+                    url = _best_image(slide)
+                    if url:
+                        media_pairs.append(("jpg", url))
+
+            if not media_pairs:
+                raise _tool_error(
+                    f"No downloadable media found in post {shortcode!r}",
+                    "parse_error",
+                    "Post may be private, or media URLs were not returned by Instagram.",
+                )
+
+            # ── 3. Download each file ────────────────────────────────────────
+            saved_files: list = []
+            total = len(media_pairs)
+            await ctx.report_progress(0.2, 1.0, message=f"Downloading {total} file(s)…")
+
+            async with _CurlSession(impersonate=config.ig_impersonate) as dl_session:
+                for idx, (ext, url) in enumerate(media_pairs, 1):
+                    fname = f"{shortcode}_{idx}.{ext}"
+                    fpath = os.path.join(save_dir, fname)
+                    try:
+                        resp = await dl_session.get(
+                            url,
+                            headers={"Referer": "https://www.instagram.com/"},
+                        )
+                        if resp.status_code != 200:
+                            saved_files.append({"file": fname, "ok": False, "error": f"HTTP {resp.status_code}"})
+                            continue
+                        with open(fpath, "wb") as f:
+                            f.write(resp.content)
+                        size_kb = len(resp.content) // 1024
+                        saved_files.append({"file": fname, "path": fpath, "size_kb": size_kb, "type": ext, "ok": True})
+                        await ctx.report_progress(0.2 + 0.8 * idx / total, 1.0, message=f"Saved {fname} ({size_kb} KB)")
+                    except Exception as exc:
+                        saved_files.append({"file": fname, "ok": False, "error": str(exc)})
+
+            elapsed = time.perf_counter() - _t0
+
+            # ── 4. Format output ─────────────────────────────────────────────
+            type_label = {1: "image", 2: "video", 8: "carousel"}.get(media_type, "unknown")
+            ok_files = [f for f in saved_files if f.get("ok")]
+            fail_files = [f for f in saved_files if not f.get("ok")]
+
+            lines = [
+                f"## Download complete — `{shortcode}`",
+                f"- **Type**: {type_label}",
+                f"- **Files**: {len(ok_files)}/{total} saved in `{save_dir}`",
+                f"- **Time**: {elapsed:.2f}s",
+                "",
+                "### Saved files",
+            ]
+            for f in ok_files:
+                lines.append(f"- `{f['path']}` ({f['size_kb']} KB, {f['type']})")
+            if fail_files:
+                lines.append("\n### Errors")
+                for f in fail_files:
+                    lines.append(f"- `{f['file']}`: {f.get('error', 'unknown error')}")
+
+            await ctx.info(f"instagram_download ✓ — {shortcode}, {len(ok_files)} files, {elapsed:.2f}s")
+            return "\n".join(lines)

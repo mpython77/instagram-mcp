@@ -1570,13 +1570,13 @@ def format_hashtag_markdown(
     lines += ["## Posts", ""]
     if is_auth_format:
         lines += [
-            "| # | Author | ✓ | Acct | ❤ Likes | 👁 Views | ♻ | 💬 | Type | 🎵 | 👥 | Link | Caption |",
-            "|---|--------|---|------|---------|---------|---|-----|------|----|-----|------|---------|",
+            "| # | Author | ✓ | Acct | ❤ Likes | 👁 Views | ♻ | 💬 | Type | 🎵 | 👥 | Date | Link | Caption |",
+            "|---|--------|---|------|---------|---------|---|-----|------|----|-----|------|------|---------|",
         ]
     else:
         lines += [
-            "| # | Author | ✓ | 👁 Views | Type | Link | Caption |",
-            "|---|--------|---|---------|------|------|---------|",
+            "| # | Author | ✓ | 👁 Views | Type | Date | Link | Caption |",
+            "|---|--------|---|---------|------|------|------|---------|",
         ]
 
     for i, post in enumerate(posts, 1):
@@ -1594,12 +1594,13 @@ def format_hashtag_markdown(
             music_cell  = music_title[:20].replace("|", "\\|") + ("…" if len(music_title) > 20 else "") if music_title else "—"
             tagged    = post.get("tagged_users") or []
             tag_cell  = str(len(tagged)) if tagged else "—"
+            date      = (post.get("taken_at_str") or "")[:10] or "—"
             cap_raw   = post.get("caption", "") or ""
             caption   = cap_raw[:50].replace("|", "\\|").replace("\n", " ")
             if len(cap_raw) > 50: caption += "…"
             lines.append(
                 f"| {i} | @{username} | {verified} | {acct_icon} | {likes} | {views} | {reposts} | {comments} | {mtype} | "
-                f"{music_cell} | {tag_cell} | [{code}](https://www.instagram.com/p/{code}/) | {caption} |"
+                f"{music_cell} | {tag_cell} | {date} | [{code}](https://www.instagram.com/p/{code}/) | {caption} |"
             )
         else:
             node = post.get("node", {}) if "node" in post else post
@@ -1611,12 +1612,21 @@ def format_hashtag_markdown(
             views      = _fmt(int(play_count)) if play_count else "—"
             typename   = node.get("__typename", "")
             mtype      = "🎬" if "Video" in typename else "🖼"
+            raw_ts     = int(node.get("taken_at_timestamp") or node.get("taken_at") or 0)
+            if raw_ts:
+                from datetime import datetime as _dt_h, timezone as _tz_h
+                try:
+                    date = _dt_h.fromtimestamp(raw_ts, tz=_tz_h.utc).strftime("%Y-%m-%d")
+                except Exception:
+                    date = "—"
+            else:
+                date = "—"
             cap_obj    = node.get("caption") or {}
             cap_raw    = (cap_obj.get("text") or "") if isinstance(cap_obj, dict) else ""
             caption    = cap_raw[:55].replace("|", "\\|").replace("\n", " ")
             if len(cap_raw) > 55: caption += "…"
             lines.append(
-                f"| {i} | @{username} | {verified} | {views} | {mtype} | "
+                f"| {i} | @{username} | {verified} | {views} | {mtype} | {date} | "
                 f"[{code}](https://www.instagram.com/p/{code}/) | {caption} |"
             )
 
@@ -2032,8 +2042,8 @@ def format_location_posts_markdown(
         return "\n".join(lines)
 
     lines += [
-        "| # | Type | User | ✔ | ❤ Likes | \U0001f4ac Comments | \U0001f441 Plays | Caption |",
-        "|---|------|------|---|---------|----------|-------|---------|",
+        "| # | Type | User | ✔ | ❤ Likes | \U0001f4ac Comments | \U0001f441 Plays | Date | Caption |",
+        "|---|------|------|---|---------|----------|-------|------|---------|",
     ]
     for i, post in enumerate(posts, 1):
         mtype = post.get("media_type", 1)
@@ -2048,6 +2058,7 @@ def format_location_posts_markdown(
         likes      = _fmt(post.get("like_count") or 0)
         comments   = _fmt(post.get("comment_count") or 0)
         plays      = _fmt(post.get("play_count") or 0) if post.get("play_count") else "—"
+        date       = (post.get("taken_at_str") or "")[:10] or "—"
         code       = post.get("shortcode", "")
         cap_raw    = post.get("caption", "") or ""
         caption    = cap_raw[:55].replace("|", "\\|").replace("\n", " ")
@@ -2055,7 +2066,7 @@ def format_location_posts_markdown(
             caption += "…"
         lines.append(
             f"| {i} | {type_icon} | [@{username}](https://www.instagram.com/{username}/) "
-            f"| {verified} | {likes} | {comments} | {plays} "
+            f"| {verified} | {likes} | {comments} | {plays} | {date} "
             f"| [{caption}](https://www.instagram.com/p/{code}/) |"
         )
 
@@ -2173,7 +2184,7 @@ def _compute_hashtag_stats(posts: list, is_auth: bool) -> Dict[str, Any]:
         comments = p.get("comment_count") or 0
         views    = p.get("play_count") or 0
         mtype    = p.get("media_type", 1)
-        taken_at = p.get("taken_at")
+        taken_at = p.get("taken_at") or p.get("taken_at_timestamp")
 
         total_likes    += likes
         total_comments += comments
@@ -2454,4 +2465,56 @@ def format_account_report_markdown(
             "",
             collab_md,
         ]
+    return "\n".join(lines)
+
+
+def format_upload_result_markdown(result: Dict[str, Any], image_paths: List[str]) -> str:
+    """Format photo upload result."""
+    ok         = result.get("ok", False)
+    post_type  = result.get("post_type", "single")
+    shortcode  = result.get("shortcode", "")
+    url        = result.get("url", "")
+    media_id   = result.get("media_id", "")
+    caption    = result.get("caption", "")
+    n_images   = result.get("images_uploaded", len(image_paths))
+
+    type_icon = "📸" if post_type == "carousel" else "🖼️"
+    type_label = f"Carousel ({n_images} images)" if post_type == "carousel" else "Single photo"
+
+    lines = [
+        f"# {type_icon} Post Published Successfully",
+        "",
+        "| Field | Value |",
+        "|-------|-------|",
+        f"| Type | {type_label} |",
+    ]
+    if url:
+        lines.append(f"| Post URL | [{url}]({url}) |")
+    if shortcode:
+        lines.append(f"| Shortcode | `{shortcode}` |")
+    if media_id:
+        lines.append(f"| Media ID | `{media_id}` |")
+
+    if caption:
+        preview = caption[:120].replace("|", "\\|") + ("…" if len(caption) > 120 else "")
+        lines.append(f"| Caption | {preview} |")
+    else:
+        lines.append("| Caption | *(none)* |")
+
+    lines += [
+        "",
+        "## Uploaded Files",
+        "",
+    ]
+    for i, p in enumerate(image_paths, 1):
+        import os as _os
+        fname = _os.path.basename(p)
+        lines.append(f"{i}. `{fname}`")
+
+    if url:
+        lines += [
+            "",
+            f"**View post:** [{url}]({url})",
+        ]
+
     return "\n".join(lines)

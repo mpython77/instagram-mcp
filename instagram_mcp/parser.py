@@ -776,9 +776,9 @@ def parse_tagged_tab_edges(
         poster_username = str(user.get("username") or "")
         poster_id = str(user.get("pk") or user.get("id") or "")
 
-        taken_at = _pk_to_timestamp(pk)
+        taken_at = int(node.get("taken_at") or 0) or _pk_to_timestamp(pk)
         taken_at_str = (
-            _dt.fromtimestamp(taken_at, tz=_tz.utc).strftime("%Y-%m-%d %H:%M")
+            _dt.fromtimestamp(taken_at, tz=_tz.utc).strftime("%Y-%m-%d %H:%M UTC")
             if taken_at
             else ""
         )
