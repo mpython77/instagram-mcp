@@ -135,6 +135,7 @@ Fetch a public account's profile data. Controls depth via flags.
 | `check_alive` | bool | `true` | Return last_post_days and active/dead status |
 | `dead_threshold_days` | int | `365` | Days without posts to mark account dead |
 | `since_date` / `until_date` | str | `""` | Filter posts by date: DD.MM.YYYY |
+| `since_timestamp` / `until_timestamp` | int | `None` | Unix timestamp alternatives to since_date/until_date |
 
 **Modes:**
 
@@ -158,6 +159,7 @@ Paginated feed analysis. Fetches up to 200 posts across multiple API pages (~50 
 | `max_age_days` | int | `30` | Stop when posts exceed this age |
 | `include_posts_detail` | bool | `false` | Include full caption, hashtags, likes, location, music per post |
 | `since_date` / `until_date` | str | `""` | Filter posts by date |
+| `since_timestamp` / `until_timestamp` | int | `None` | Unix timestamp alternatives to since_date/until_date |
 
 **Note:** Play counts on reels are not available via this tool. Use `instagram_reels` for play counts.
 
@@ -200,6 +202,7 @@ Calculates ER% and detailed content analytics across up to 200 posts.
 | `max_posts` | int | `50` | Posts to analyse (1–200) |
 | `max_age_days` | int | `90` | Skip posts older than N days |
 | `since_date` / `until_date` | str | `""` | Date filters |
+| `since_timestamp` / `until_timestamp` | int | `None` | Unix timestamp alternatives to since_date/until_date |
 
 **Formula:** `ER% = (avg_likes + avg_comments) / followers × 100`
 
@@ -220,6 +223,7 @@ Maps all people who appear across recent posts across four relationship types: p
 | `max_age_days` | int | `90` | Skip posts older than N days |
 | `min_frequency` | int | `1` | Minimum appearances to include (1–50) |
 | `since_date` / `until_date` | str | `""` | Date filters |
+| `since_timestamp` / `until_timestamp` | int | `None` | Unix timestamp alternatives to since_date/until_date |
 
 ---
 
@@ -286,7 +290,7 @@ Fetch users who liked a post with full friendship status per liker.
 |-----------|------|---------|-------------|
 | `post` | str | required | Post shortcode or URL |
 
-Returns up to ~98 likers. Per user: username, full_name, is_verified, is_private, you_follow_them, they_follow_you, plus total like count for the post.
+Returns up to ~98 likers. Per user: username, full_name, is_verified, is_private, you_follow_them, they_follow_you, recent_reel_activity, plus total like count for the post.
 
 ---
 
@@ -370,9 +374,9 @@ Fetch recent followers with mutual follow status.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `username` | str | required | Instagram username (without @) |
-| `max_users` | int | `50` | Max followers to return |
+| `max_users` | int | `50` | Max followers to return (1–1000) |
 
-**Limitation:** Instagram restricts follower access to ~50 users for accounts other than your own, regardless of max_users.
+**Limitation:** For accounts *other than your own*, Instagram restricts follower pagination to ~50 users. For your *own* account, full pagination is supported (up to 1000).
 
 ---
 
@@ -385,7 +389,7 @@ Fetch the full following list with favorite detection and pagination.
 | `username` | str | required | Instagram username (without @) |
 | `max_users` | int | `200` | Max following accounts (1–1000, 50 per page) |
 
-**Per user:** username, full_name, is_verified, is_private, is_favorite (Close Friend marker), you_follow_them, they_follow_you.
+**Per user:** username, full_name, is_verified, is_private, is_favorite (Close Friend marker), you_follow_them, they_follow_you, recent_reel_activity.
 
 ---
 
@@ -439,7 +443,7 @@ Fetch an account's currently active Stories (expires after 24h, cached 2 min).
 |-----------|------|---------|-------------|
 | `username` | str | required | Instagram username (without @) |
 
-**Per story:** media_type, duration_secs, mentions, hashtags, linked_post_code, music_title, music_artist, link_stickers, polls, is_paid_partnership, capture_type (boomerang/selfie), camera_facing.
+**Per story:** media_type, duration_secs, mentions, hashtags, linked_post_code, music_title, music_artist, link_stickers, polls, is_paid_partnership.
 
 ---
 
@@ -508,7 +512,7 @@ Download all media files from an Instagram post to a local directory.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `post` | str | required | Post shortcode or URL |
-| `save_dir` | str | required | Existing local directory path |
+| `save_dir` | str | `"/tmp"` | Local directory path to save files |
 
 **Supports:**
 - Single image posts → saves 1 `.jpg`

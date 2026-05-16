@@ -12,7 +12,7 @@ Tools:
   4. instagram_find_collab_network — 🌐 Collaboration/mention network map
   5. instagram_compare_profiles  — 🌐 Side-by-side comparison (2-5 accounts)
   6. instagram_bulk_check        — 🌐 Up to 20 profiles in parallel
-  7. instagram_batch_scrape      — 🌐 Large-scale scraping (up to 500 profiles)
+  7. instagram_batch_scrape      — 🌐 Large-scale scraping (up to 2000 profiles)
   8. instagram_server            — 🌐 Server diagnostics + cache management
   9. instagram_tagged_by         — 🔐 Posts where OTHERS tagged this account
  10. instagram_reposts           — 🔐 Content this account reposted from others
@@ -965,7 +965,7 @@ def register_tools(
                     since_date / until_date (DD.MM.YYYY),
                     use_cookies, output_file,
                     profile_only (default False — TURBO MODE if True),
-                    stream_jsonl (default False — live append to .jsonl)
+                    stream_jsonl (default True — live append to .jsonl)
         """
         import os as _os
 
