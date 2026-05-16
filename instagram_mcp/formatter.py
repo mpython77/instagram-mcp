@@ -2145,3 +2145,313 @@ def format_audio_reels_markdown(
         ]
 
     return "\n".join(lines)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# NEW TOOL FORMATTERS
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _compute_hashtag_stats(posts: list, is_auth: bool) -> Dict[str, Any]:
+    """Compute aggregate analytics from a flat list of hashtag posts."""
+    from collections import defaultdict
+    from datetime import datetime as _dt2, timezone as _tz2
+
+    accounts: Dict[str, Dict] = defaultdict(lambda: {
+        "post_count": 0, "total_likes": 0, "total_comments": 0,
+        "total_views": 0, "verified": False, "account_type": 0,
+    })
+    total_likes = total_comments = total_views = 0
+    media_types: Dict[int, int] = defaultdict(int)
+    hour_counts: Dict[int, int] = defaultdict(int)
+
+    for p in posts:
+        if not is_auth:
+            p = p.get("node", p)
+
+        username = p.get("username", "")
+        likes    = p.get("like_count") or 0
+        comments = p.get("comment_count") or 0
+        views    = p.get("play_count") or 0
+        mtype    = p.get("media_type", 1)
+        taken_at = p.get("taken_at")
+
+        total_likes    += likes
+        total_comments += comments
+        total_views    += views
+        media_types[mtype] += 1
+
+        if taken_at:
+            try:
+                hour = _dt2.fromtimestamp(int(taken_at), tz=_tz2.utc).hour
+                hour_counts[hour] += 1
+            except Exception:
+                pass
+
+        if username:
+            acc = accounts[username]
+            acc["post_count"]     += 1
+            acc["total_likes"]    += likes
+            acc["total_comments"] += comments
+            acc["total_views"]    += views
+            acc["verified"]       = acc["verified"] or bool(p.get("verified"))
+            acc["account_type"]   = p.get("account_type", 0) or acc["account_type"]
+
+    n = max(len(posts), 1)
+    top_accounts = sorted(
+        [
+            {
+                "username":       u,
+                "post_count":     d["post_count"],
+                "total_likes":    d["total_likes"],
+                "total_comments": d["total_comments"],
+                "avg_likes":      d["total_likes"] // max(d["post_count"], 1),
+                "avg_comments":   d["total_comments"] // max(d["post_count"], 1),
+                "avg_engagement": (d["total_likes"] + d["total_comments"]) // max(d["post_count"], 1),
+                "verified":       d["verified"],
+                "account_type":   d["account_type"],
+            }
+            for u, d in accounts.items()
+        ],
+        key=lambda x: x["avg_engagement"],
+        reverse=True,
+    )
+
+    best_hour = max(hour_counts, key=lambda k: hour_counts[k]) if hour_counts else None
+
+    return {
+        "total_posts":   len(posts),
+        "avg_likes":     total_likes // n,
+        "avg_comments":  total_comments // n,
+        "avg_views":     total_views // n,
+        "total_likes":   total_likes,
+        "media_types":   dict(media_types),
+        "top_accounts":  top_accounts,
+        "best_hour_utc": best_hour,
+        "hour_counts":   dict(hour_counts),
+    }
+
+
+def format_hashtag_deep_markdown(
+    tag: str,
+    posts: list,
+    auth_used: bool,
+    top_n: int = 15,
+) -> str:
+    """Deep hashtag analysis: top accounts, engagement stats, content breakdown."""
+    _fmt = format_followers
+    n = len(posts)
+    is_auth = auth_used or (n > 0 and "shortcode" in posts[0])
+
+    lines = [
+        f"# #{tag} — Deep Analysis",
+        "",
+        f"**Posts analysed:** {n}  |  **Mode:** {'🔐 auth' if auth_used else '🌐 anon'}",
+        "",
+    ]
+
+    if not posts:
+        lines.append("*No posts found for this hashtag.*")
+        return "\n".join(lines)
+
+    stats = _compute_hashtag_stats(posts, is_auth)
+    mt = stats["media_types"]
+
+    lines += [
+        "## Engagement Summary",
+        "",
+        "| Metric | Value |",
+        "|--------|-------|",
+        f"| Avg likes/post | {_fmt(stats['avg_likes'])} |",
+        f"| Avg comments/post | {_fmt(stats['avg_comments'])} |",
+        f"| Avg views/post (reels) | {_fmt(stats['avg_views'])} |",
+        f"| Total likes | {_fmt(stats['total_likes'])} |",
+        f"| Photos | {mt.get(1, 0)} |",
+        f"| Videos/Reels | {mt.get(2, 0)} |",
+        f"| Carousels | {mt.get(8, 0)} |",
+    ]
+    if stats["best_hour_utc"] is not None:
+        h = stats["best_hour_utc"]
+        lines.append(f"| Best posting hour (UTC) | {h:02d}:00–{(h + 1) % 24:02d}:00 |")
+    lines.append("")
+
+    top = stats["top_accounts"][:top_n]
+    lines += [
+        "## Top Accounts by Engagement",
+        "",
+        "| # | Username | ✓ | Acct | Posts | Avg❤ | Avg💬 | Avg Engagement |",
+        "|---|----------|---|------|-------|------|------|----------------|",
+    ]
+    for i, acc in enumerate(top, 1):
+        verified  = "✓" if acc["verified"] else ""
+        acct_icon = _account_type_icon(acc["account_type"])
+        username  = acc["username"]
+        lines.append(
+            f"| {i} | [@{username}](https://www.instagram.com/{username}/) "
+            f"| {verified} | {acct_icon} | {acc['post_count']} "
+            f"| {_fmt(acc['avg_likes'])} | {_fmt(acc['avg_comments'])} "
+            f"| **{_fmt(acc['avg_engagement'])}** |"
+        )
+    lines.append("")
+
+    if not auth_used:
+        lines += [
+            "> ⚠️ Anon mode: only 12 posts analysed. Add cookies for full pagination (up to 500 posts).",
+            "",
+        ]
+
+    lines += ["---", "*Engagement = avg (likes + comments) per post.*"]
+    return "\n".join(lines)
+
+
+def format_post_bulk_markdown(results: List[Dict[str, Any]]) -> str:
+    """Format bulk post results as a summary table."""
+    _fmt = format_followers
+    ok     = [r for r in results if r.get("ok")]
+    failed = [r for r in results if not r.get("ok")]
+
+    lines = [
+        f"# Bulk Post Fetch — {len(ok)}/{len(results)} succeeded",
+        "",
+    ]
+
+    if ok:
+        lines += [
+            "| # | Shortcode | Author | ✓ | Type | ❤ Likes | 💬 | 👁 Views | Date | Caption |",
+            "|---|-----------|--------|---|------|---------|----|---------|------|---------|",
+        ]
+        _type_icon = {"photo": "🖼", "video": "🎬", "carousel": "🎠", "reel": "🎬"}
+        for i, r in enumerate(ok, 1):
+            verified  = "✓" if r.get("is_verified") else ""
+            icon      = _type_icon.get(r.get("post_type", ""), "📄")
+            likes     = _fmt(r["likes"]) if r.get("likes") is not None else "—"
+            comments  = _fmt(r["comments"]) if r.get("comments") is not None else "—"
+            views_val = r.get("view_count") or r.get("play_count")
+            views     = _fmt(views_val) if views_val else "—"
+            date      = (r.get("taken_at_str") or "")[:10]
+            cap_raw   = r.get("caption") or ""
+            caption   = cap_raw[:50].replace("|", "\\|").replace("\n", " ")
+            if len(cap_raw) > 50:
+                caption += "…"
+            sc = r["shortcode"]
+            lines.append(
+                f"| {i} | [{sc}](https://www.instagram.com/p/{sc}/) "
+                f"| @{r.get('username', '')} | {verified} | {icon} "
+                f"| {likes} | {comments} | {views} | {date} | {caption} |"
+            )
+        lines.append("")
+
+    if failed:
+        lines += [
+            "## Failed",
+            "",
+            "| Shortcode | Error |",
+            "|-----------|-------|",
+        ]
+        for r in failed:
+            sc  = r.get("shortcode", "?")
+            err = (r.get("error") or "unknown")[:80].replace("|", "\\|")
+            lines.append(f"| {sc} | {err} |")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def format_similar_accounts_markdown(seed_username: str, accounts: List[Dict[str, Any]]) -> str:
+    """Format similar accounts list."""
+    _fmt = format_followers
+    lines = [
+        f"# Accounts Similar to @{seed_username}",
+        "",
+        f"**Found:** {len(accounts)} accounts",
+        "",
+        "| # | Username | Full Name | ✓ | 🔒 | Followers | Category |",
+        "|---|----------|-----------|---|---|-----------|----------|",
+    ]
+    for i, acc in enumerate(accounts, 1):
+        verified  = "✓" if acc.get("is_verified") else ""
+        private   = "🔒" if acc.get("is_private") else ""
+        username  = acc.get("username", "")
+        followers = acc.get("follower_count")
+        fc        = _fmt(followers) if followers is not None else "—"
+        full_name = (acc.get("full_name") or "")[:24].replace("|", "\\|")
+        category  = (acc.get("category") or "")[:20].replace("|", "\\|")
+        lines.append(
+            f"| {i} | [@{username}](https://www.instagram.com/{username}/) "
+            f"| {full_name} | {verified} | {private} | {fc} | {category} |"
+        )
+    lines += [
+        "",
+        "---",
+        "*Data: Instagram discover/chaining API — authenticated session.*",
+    ]
+    return "\n".join(lines)
+
+
+def format_niche_top_markdown(
+    tag: str,
+    accounts: List[Dict[str, Any]],
+    posts_analysed: int,
+    sort_by: str = "engagement",
+    auth_used: bool = False,
+) -> str:
+    """Format top niche accounts table."""
+    _fmt = format_followers
+    sort_label = {
+        "engagement": "avg engagement",
+        "post_count": "post count",
+        "total_likes": "total likes",
+    }.get(sort_by, sort_by)
+
+    lines = [
+        f"# #{tag} — Top Accounts in Niche",
+        "",
+        f"**Posts analysed:** {posts_analysed}  |  **Ranked by:** {sort_label}  |  **Mode:** {'🔐 auth' if auth_used else '🌐 anon'}",
+        "",
+        "| # | Username | ✓ | Acct | Posts | Avg❤ | Avg💬 | Avg Engagement | Total❤ |",
+        "|---|----------|---|------|-------|------|------|----------------|--------|",
+    ]
+    for i, acc in enumerate(accounts, 1):
+        verified  = "✓" if acc.get("verified") else ""
+        acct_icon = _account_type_icon(acc.get("account_type", 0))
+        username  = acc.get("username", "")
+        lines.append(
+            f"| {i} | [@{username}](https://www.instagram.com/{username}/) "
+            f"| {verified} | {acct_icon} | {acc.get('post_count', 0)} "
+            f"| {_fmt(acc.get('avg_likes', 0))} | {_fmt(acc.get('avg_comments', 0))} "
+            f"| **{_fmt(acc.get('avg_engagement', 0))}** | {_fmt(acc.get('total_likes', 0))} |"
+        )
+    lines += ["", "---"]
+    if not auth_used:
+        lines.append(
+            "*⚠️ Anon mode: only 12 posts analysed. Use cookies for accurate niche rankings.*"
+        )
+    else:
+        lines.append(
+            "*Data: Instagram /api/v1/tags/sections/ — authenticated. Engagement = avg (likes + comments) per post.*"
+        )
+    return "\n".join(lines)
+
+
+def format_account_report_markdown(
+    username: str,
+    engagement_md: str,
+    collab_md: Optional[str],
+) -> str:
+    """Combine engagement analysis (which includes profile) + collab into one report."""
+    lines = [
+        f"# Account Report — @{username}",
+        "",
+        "---",
+        "",
+        engagement_md,
+    ]
+    if collab_md:
+        lines += [
+            "",
+            "---",
+            "",
+            "## Collaboration Network",
+            "",
+            collab_md,
+        ]
+    return "\n".join(lines)

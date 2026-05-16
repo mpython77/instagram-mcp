@@ -1210,3 +1210,183 @@ class PostLikersInput(BaseModel):
         if not v:
             raise ValueError("post shortcode must not be empty")
         return v
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NEW TOOL INPUT MODELS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class HashtagDeepInput(BaseModel):
+    """Input for instagram_hashtag_deep tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    tag: str = Field(
+        description=(
+            "Hashtag to analyse (without #). "
+            "Example: 'football', 'photography', 'travel'."
+        ),
+    )
+    max_posts: int = Field(
+        default=90,
+        ge=1,
+        le=500,
+        description=(
+            "Maximum posts to retrieve for analysis (up to 500). "
+            "🔐 Auth mode: full pagination, 30 posts/page. "
+            "🌐 Anon mode: capped at 12 regardless of this value."
+        ),
+    )
+    top_n: int = Field(
+        default=15,
+        ge=1,
+        le=50,
+        description="Number of top accounts to show in the ranking table.",
+    )
+
+    @field_validator("tag")
+    @classmethod
+    def clean_tag(cls, v: str) -> str:
+        v = v.lstrip("#").strip().lower()
+        if not v:
+            raise ValueError("tag must not be empty")
+        return v
+
+
+class PostBulkInput(BaseModel):
+    """Input for instagram_post_bulk tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    shortcodes: List[str] = Field(
+        ...,
+        description=(
+            "List of post shortcodes or full post URLs to fetch in parallel. "
+            "Shortcode examples: 'DXjuqH9nDVE', 'C1abc123XYZ'. "
+            "URL examples: 'https://www.instagram.com/p/DXjuqH9nDVE/'. "
+            "Max 50 posts per call."
+        ),
+        min_length=1,
+        max_length=50,
+    )
+    max_concurrency: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Parallel requests (1-20). Default 5 — safe for direct connections.",
+    )
+
+    @field_validator("shortcodes")
+    @classmethod
+    def clean_shortcodes(cls, v: List[str]) -> List[str]:
+        cleaned = []
+        for raw in v:
+            sc = raw.strip()
+            if "/" in sc:
+                sc = [p for p in sc.rstrip("/").split("/") if p][-1]
+            if sc:
+                cleaned.append(sc)
+        if not cleaned:
+            raise ValueError("shortcodes list must contain at least one valid shortcode")
+        return cleaned
+
+
+class SimilarAccountsInput(BaseModel):
+    """Input for instagram_similar_accounts tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    username: str = Field(
+        description="Instagram username to find similar accounts for (without @).",
+    )
+    limit: int = Field(
+        default=20,
+        ge=1,
+        le=50,
+        description="Max number of similar accounts to return (1-50).",
+    )
+
+    @field_validator("username")
+    @classmethod
+    def clean_username(cls, v: str) -> str:
+        v = v.strip().lstrip("@").lower()
+        if not v:
+            raise ValueError("username must not be empty")
+        return v
+
+
+class NicheTopInput(BaseModel):
+    """Input for instagram_niche_top tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    tag: str = Field(
+        description=(
+            "Hashtag that defines the niche (without #). "
+            "Example: 'fitness', 'streetwear', 'foodphotography'."
+        ),
+    )
+    max_posts: int = Field(
+        default=90,
+        ge=12,
+        le=500,
+        description=(
+            "Number of hashtag posts to analyse (min 12, max 500). "
+            "More posts → better account ranking accuracy. "
+            "🔐 Auth: paginated. 🌐 Anon: capped at 12."
+        ),
+    )
+    top_n: int = Field(
+        default=15,
+        ge=3,
+        le=50,
+        description="Number of top accounts to return.",
+    )
+    sort_by: str = Field(
+        default="engagement",
+        description=(
+            "How to rank accounts. "
+            "'engagement' = avg (likes+comments) per post (default). "
+            "'post_count' = most posts in the hashtag. "
+            "'total_likes' = highest total likes."
+        ),
+    )
+
+    @field_validator("tag")
+    @classmethod
+    def clean_tag(cls, v: str) -> str:
+        v = v.lstrip("#").strip().lower()
+        if not v:
+            raise ValueError("tag must not be empty")
+        return v
+
+    @field_validator("sort_by")
+    @classmethod
+    def clean_sort(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in ("engagement", "post_count", "total_likes"):
+            raise ValueError("sort_by must be 'engagement', 'post_count', or 'total_likes'")
+        return v
+
+
+class AccountReportInput(BaseModel):
+    """Input for instagram_account_report tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    username: str = Field(
+        description="Instagram username (without @). Example: 'nike', 'cristiano'.",
+    )
+    max_posts: int = Field(
+        default=50,
+        ge=1,
+        le=200,
+        description="Posts to fetch for engagement analysis (1-200). Default 50.",
+    )
+    include_collab: bool = Field(
+        default=True,
+        description="Include collaboration network (tags, mentions, sponsors). Adds one API call.",
+    )
+
+    @field_validator("username")
+    @classmethod
+    def clean_username(cls, v: str) -> str:
+        v = v.strip().lstrip("@").lower()
+        if not v:
+            raise ValueError("username must not be empty")
+        return v

@@ -46,6 +46,7 @@ from .config import MCPConfig
 from .exceptions import InstagramMCPError
 from .exporter import JsonExporter
 from .formatter import (
+    format_account_report_markdown,
     format_account_status_markdown,
     format_audio_reels_markdown,
     format_bulk_results_markdown,
@@ -56,11 +57,15 @@ from .formatter import (
     format_engagement_analysis_markdown,
     format_followers_markdown,
     format_following_markdown,
+    format_hashtag_deep_markdown,
     format_hashtag_markdown,
     format_highlights_markdown,
     format_location_posts_markdown,
+    format_niche_top_markdown,
+    format_post_bulk_markdown,
     format_post_likers_markdown,
     format_search_markdown,
+    format_similar_accounts_markdown,
     format_post_markdown,
     format_posts_markdown,
     format_profile_markdown,
@@ -72,6 +77,7 @@ from .formatter import (
     format_tagged_by_markdown,
 )
 from .models import (
+    AccountReportInput,
     AudioReelsInput,
     BulkProfilesInput,
     CollabNetworkInput,
@@ -82,11 +88,15 @@ from .models import (
     FeedTagResult,
     FollowersInput,
     FollowingInput,
+    HashtagDeepInput,
     HashtagInput,
     HighlightsInput,
     LocationPostsInput,
+    NicheTopInput,
+    PostBulkInput,
     PostLikersInput,
     SearchInput,
+    SimilarAccountsInput,
     InstagramProfile,
     PostCommentsInput,
     PostInput,
@@ -2493,3 +2503,410 @@ def register_tools(
         await ctx.report_progress(1.0, 1.0, message="Done")
         await exporter.save("audio_reels", audio_cluster_id, result, elapsed)
         return out
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL 20: instagram_hashtag_deep
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("content"):
+        @mcp.tool(
+            name="instagram_hashtag_deep",
+            annotations={
+                "title": "Instagram Hashtag Deep Analysis",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
+        async def instagram_hashtag_deep(params: HashtagDeepInput, ctx: Context) -> str:
+            """
+            🌐/🔐 AUTO-MODE — deep hashtag analytics.
+
+            Fetches up to 500 posts for a hashtag and computes:
+            • Top accounts ranked by avg engagement (likes + comments)
+            • Content type breakdown (photo / video / carousel)
+            • Best posting hour (UTC)
+            • Average and total likes, comments, views
+
+            🌐 Anon mode (no cookies): 12 posts max — limited analytics.
+            🔐 Auth mode (cookies present): full pagination up to 500 posts — accurate data.
+
+            Use this instead of instagram_hashtag when you need:
+            - "Who dominates #fitness?" → top_accounts table
+            - "What content type performs best in #travel?" → media_types breakdown
+            - "Best time to post for #food?" → best_hour_utc
+
+            Params: tag (required), max_posts (1-500, default 90), top_n (1-50, default 15)
+
+            When NOT to use:
+            - Just browsing top posts: use instagram_hashtag instead (faster, simpler)
+            - Need individual post details: use instagram_post or instagram_post_bulk
+            """
+            if not params.tag:
+                raise _tool_error("tag is required", "validation_error", "Provide a hashtag without #.")
+
+            await ctx.info(f"instagram_hashtag_deep: #{params.tag} max_posts={params.max_posts}")
+            _t0 = time.perf_counter()
+            await ctx.report_progress(0.0, 1.0, message=f"Fetching #{params.tag} posts...")
+
+            try:
+                result = await client.fetch_hashtag(params.tag, max_posts=params.max_posts)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+            if result is None:
+                raise _tool_error(
+                    f"Hashtag #{params.tag} not found or unavailable.",
+                    "not_found",
+                    "Check the hashtag spelling.",
+                )
+
+            posts      = result.get("posts") or []
+            auth_used  = result.get("auth_used", False)
+
+            await ctx.report_progress(0.9, 1.0, message=f"Computing analytics on {len(posts)} posts...")
+            out = format_hashtag_deep_markdown(params.tag, posts, auth_used, top_n=params.top_n)
+
+            elapsed = time.perf_counter() - _t0
+            await ctx.info(f"hashtag_deep #{params.tag} ✓ — {len(posts)} posts — {elapsed:.2f}s")
+            await ctx.report_progress(1.0, 1.0, message="Done")
+            await exporter.save("hashtag_deep", params.tag, result, elapsed)
+            return out
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL 21: instagram_post_bulk
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("content"):
+        @mcp.tool(
+            name="instagram_post_bulk",
+            annotations={
+                "title": "Instagram Post Bulk Fetch",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
+        async def instagram_post_bulk(params: PostBulkInput, ctx: Context) -> str:
+            """
+            🌐 NO LOGIN REQUIRED — fetch multiple posts in parallel.
+
+            Given a list of shortcodes or post URLs, fetches all posts in parallel
+            and returns a summary table with likes, comments, views, captions,
+            location, music, and hashtags.
+
+            Params:
+              shortcodes  — list of shortcodes or post URLs (max 50)
+              max_concurrency — parallel requests (1-20, default 5)
+
+            Examples:
+              shortcodes=["DXjuqH9nDVE", "C1abc123XYZ"]
+              shortcodes=["https://www.instagram.com/p/DXjuqH9nDVE/"]
+
+            When NOT to use:
+            - Single post: use instagram_post instead
+            - Need comments: use instagram_post_comments per shortcode
+            - Need all posts from a user: use instagram_feed_deep
+            """
+            if not params.shortcodes:
+                raise _tool_error(
+                    "shortcodes list is empty.",
+                    "validation_error",
+                    "Provide at least one post shortcode or URL.",
+                )
+
+            await ctx.info(f"instagram_post_bulk: {len(params.shortcodes)} shortcodes, concurrency={params.max_concurrency}")
+            _t0 = time.perf_counter()
+            await ctx.report_progress(0.0, 1.0, message=f"Fetching {len(params.shortcodes)} posts...")
+
+            try:
+                results = await client.fetch_post_bulk(
+                    shortcodes=params.shortcodes,
+                    max_concurrency=params.max_concurrency,
+                )
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+            ok_count = sum(1 for r in results if r.get("ok"))
+            await ctx.report_progress(0.9, 1.0, message=f"Formatting {ok_count}/{len(results)} results...")
+            out = format_post_bulk_markdown(results)
+
+            elapsed = time.perf_counter() - _t0
+            await ctx.info(f"post_bulk ✓ — {ok_count}/{len(results)} OK — {elapsed:.2f}s")
+            await ctx.report_progress(1.0, 1.0, message="Done")
+            await exporter.save("post_bulk", f"bulk_{len(params.shortcodes)}", {"results": results}, elapsed)
+            return out
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL 22: instagram_similar_accounts
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+        @mcp.tool(
+            name="instagram_similar_accounts",
+            annotations={
+                "title": "Instagram Similar Accounts",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
+        async def instagram_similar_accounts(params: SimilarAccountsInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — find accounts similar to a given user.
+
+            Uses Instagram's internal discover/chaining API to return accounts
+            that Instagram considers similar (same niche, audience overlap).
+
+            Useful for:
+            - Competitor discovery: find all brands competing in the same space
+            - Influencer sourcing: start from one account, expand the network
+            - Niche mapping: understand who else operates in this niche
+
+            Params:
+              username — seed account (without @)
+              limit    — max accounts to return (1-50, default 20)
+
+            When NOT to use:
+            - No auth / cookies: this tool will return a "no auth" error
+            - Need niche ranking by engagement: use instagram_niche_top instead
+            """
+            try:
+                username = sanitize_username(params.username)
+            except ValueError as e:
+                raise _tool_error(str(e), "validation_error", "Provide a valid Instagram username.")
+
+            await ctx.info(f"instagram_similar_accounts: @{username} limit={params.limit}")
+            _t0 = time.perf_counter()
+            await ctx.report_progress(0.0, 1.0, message=f"Finding accounts similar to @{username}...")
+
+            try:
+                accounts = await client.fetch_similar_accounts(username, limit=params.limit)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+            if accounts is None:
+                raise _tool_error(
+                    "instagram_similar_accounts requires an authenticated session.",
+                    "auth_required",
+                    "Export cookies from your browser after logging in to Instagram, "
+                    "save as cookies.txt, and restart the MCP server.",
+                )
+
+            out = format_similar_accounts_markdown(username, accounts)
+            elapsed = time.perf_counter() - _t0
+            await ctx.info(f"similar_accounts @{username} ✓ — {len(accounts)} accounts — {elapsed:.2f}s")
+            await ctx.report_progress(1.0, 1.0, message="Done")
+            await exporter.save("similar_accounts", username, {"accounts": accounts}, elapsed)
+            return out
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL 23: instagram_niche_top
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("content"):
+        @mcp.tool(
+            name="instagram_niche_top",
+            annotations={
+                "title": "Instagram Niche Top Accounts",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
+        async def instagram_niche_top(params: NicheTopInput, ctx: Context) -> str:
+            """
+            🌐/🔐 AUTO-MODE — discover top accounts in a hashtag niche.
+
+            Fetches posts for a hashtag, then aggregates them by author and
+            ranks accounts by engagement, post count, or total likes.
+
+            Returns a leaderboard of the most active / best-performing accounts
+            in that niche — great for influencer discovery and competitor research.
+
+            🌐 Anon mode: 12 posts max — very limited (use auth for useful results).
+            🔐 Auth mode: up to 500 posts — accurate niche map.
+
+            Params:
+              tag        — hashtag (without #)
+              max_posts  — posts to fetch for analysis (12-500, default 90)
+              top_n      — accounts to return (3-50, default 15)
+              sort_by    — 'engagement' | 'post_count' | 'total_likes' (default 'engagement')
+
+            When NOT to use:
+            - Need full profile details for each account: follow up with instagram_bulk_check
+            - Need similar accounts by Instagram's algorithm: use instagram_similar_accounts
+            """
+            await ctx.info(f"instagram_niche_top: #{params.tag} max_posts={params.max_posts} top_n={params.top_n}")
+            _t0 = time.perf_counter()
+            await ctx.report_progress(0.0, 1.0, message=f"Fetching #{params.tag} posts for niche analysis...")
+
+            try:
+                result = await client.fetch_hashtag(params.tag, max_posts=params.max_posts)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+            if result is None:
+                raise _tool_error(
+                    f"Hashtag #{params.tag} not found.",
+                    "not_found",
+                    "Check the hashtag spelling.",
+                )
+
+            posts     = result.get("posts") or []
+            auth_used = result.get("auth_used", False)
+
+            # Compute per-account stats
+            from collections import defaultdict
+            acc_data: dict = defaultdict(lambda: {
+                "post_count": 0, "total_likes": 0, "total_comments": 0,
+                "verified": False, "account_type": 0,
+            })
+            for p in posts:
+                uname = p.get("username", "")
+                if not uname:
+                    continue
+                d = acc_data[uname]
+                d["post_count"]     += 1
+                d["total_likes"]    += p.get("like_count") or 0
+                d["total_comments"] += p.get("comment_count") or 0
+                d["verified"]        = d["verified"] or bool(p.get("verified"))
+                d["account_type"]    = p.get("account_type", 0) or d["account_type"]
+
+            accounts_list = [
+                {
+                    "username":       u,
+                    "post_count":     d["post_count"],
+                    "total_likes":    d["total_likes"],
+                    "total_comments": d["total_comments"],
+                    "avg_likes":      d["total_likes"] // max(d["post_count"], 1),
+                    "avg_comments":   d["total_comments"] // max(d["post_count"], 1),
+                    "avg_engagement": (d["total_likes"] + d["total_comments"]) // max(d["post_count"], 1),
+                    "verified":       d["verified"],
+                    "account_type":   d["account_type"],
+                }
+                for u, d in acc_data.items()
+            ]
+
+            sort_key = {
+                "engagement": lambda x: x["avg_engagement"],
+                "post_count": lambda x: x["post_count"],
+                "total_likes": lambda x: x["total_likes"],
+            }.get(params.sort_by, lambda x: x["avg_engagement"])
+            accounts_list.sort(key=sort_key, reverse=True)
+            top = accounts_list[: params.top_n]
+
+            await ctx.report_progress(0.9, 1.0, message="Formatting niche ranking...")
+            out = format_niche_top_markdown(
+                tag=params.tag,
+                accounts=top,
+                posts_analysed=len(posts),
+                sort_by=params.sort_by,
+                auth_used=auth_used,
+            )
+            elapsed = time.perf_counter() - _t0
+            await ctx.info(f"niche_top #{params.tag} ✓ — {len(top)} accounts from {len(posts)} posts — {elapsed:.2f}s")
+            await ctx.report_progress(1.0, 1.0, message="Done")
+            await exporter.save("niche_top", params.tag, {"accounts": top, "posts_analysed": len(posts)}, elapsed)
+            return out
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL 24: instagram_account_report
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("analysis"):
+        @mcp.tool(
+            name="instagram_account_report",
+            annotations={
+                "title": "Instagram Account Full Report",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
+        async def instagram_account_report(params: AccountReportInput, ctx: Context) -> str:
+            """
+            🌐 NO LOGIN REQUIRED — full account report in one call.
+
+            Combines instagram_profile + instagram_analyze_engagement +
+            optionally instagram_find_collab_network into a single comprehensive
+            report. Saves 2-3 tool calls when you need the full picture.
+
+            Returns:
+            • Profile section: followers, bio, verification, account type, dead-check
+            • Engagement section: ER%, content mix, best days, top posts, top hashtags
+            • Collab section (if include_collab=True): tags, mentions, sponsors, coauthors
+
+            Params:
+              username       — Instagram username (without @)
+              max_posts      — posts to fetch for analysis (1-200, default 50)
+              include_collab — include collaboration network (default True)
+
+            When NOT to use:
+            - Just need profile: use instagram_profile (faster, one API call)
+            - Just need engagement: use instagram_analyze_engagement
+            - Need 200+ posts: call instagram_feed_deep + instagram_analyze_engagement separately
+            """
+            try:
+                username = sanitize_username(params.username)
+            except ValueError as e:
+                raise _tool_error(str(e), "validation_error", "Provide a valid Instagram username.")
+
+            await ctx.info(f"instagram_account_report: @{username} max_posts={params.max_posts}")
+            _t0 = time.perf_counter()
+            await ctx.report_progress(0.0, 1.0, message=f"Fetching profile for @{username}...")
+
+            # 1. Profile
+            try:
+                user = await client.fetch_user(username)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+            if user is None:
+                raise _tool_error(
+                    f"@{username} not found.",
+                    "not_found",
+                    "Check the username spelling.",
+                )
+
+            from .formatter import (
+                format_engagement_analysis_markdown,
+                format_collab_network_markdown,
+            )
+
+            profile = parse_profile(user, username, config)
+
+            await ctx.report_progress(0.3, 1.0, message=f"Fetching {params.max_posts} posts for @{username}...")
+
+            # 2. Feed — use _paginate_feed for consistent pagination + progress
+            items, effective_max = await _paginate_feed(
+                client, config, profile,
+                params.max_posts, 365, None, ctx,
+            )
+            feed_tags = parse_feed_items(items, effective_max, 365)
+            posts = feed_tags.posts
+
+            # engagement_md from format_engagement_analysis_markdown already includes profile
+            engagement_md = format_engagement_analysis_markdown(profile, posts)
+
+            await ctx.report_progress(0.7, 1.0, message="Building collaboration map...")
+
+            # 3. Collab (optional)
+            collab_md = None
+            if params.include_collab and posts:
+                collab_md = format_collab_network_markdown(profile, posts)
+
+            out = format_account_report_markdown(username, engagement_md, collab_md)
+            elapsed = time.perf_counter() - _t0
+            await ctx.info(f"account_report @{username} ✓ — {len(posts)} posts — {elapsed:.2f}s")
+            await ctx.report_progress(1.0, 1.0, message="Done")
+            await exporter.save(
+                "account_report", username,
+                {"profile": user, "posts_fetched": len(posts)},
+                elapsed,
+            )
+            return out

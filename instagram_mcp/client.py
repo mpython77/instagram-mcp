@@ -1783,6 +1783,134 @@ class InstagramClient:
         logger.debug("fetch_hashtag(%s): using anon HTML parse", tag)
         return await self._cache.get_or_fetch(cache_key, _do_fetch_anon, ttl=ttl)
 
+    # ── Post bulk ─────────────────────────────────────────────────────────────
+
+    async def fetch_post_bulk(
+        self,
+        shortcodes: List[str],
+        max_concurrency: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch multiple posts in parallel.
+
+        Each element is either a parsed dict (ok=True) or an error dict (ok=False).
+        The list preserves input order.
+        """
+        from .parser import parse_post_html
+
+        sem = asyncio.Semaphore(max_concurrency)
+
+        async def _one(sc: str) -> Dict[str, Any]:
+            async with sem:
+                try:
+                    html = await self.fetch_post(sc)
+                    info = parse_post_html(html, sc)
+                    return {
+                        "shortcode":      sc,
+                        "ok":             True,
+                        "username":       info.username,
+                        "full_name":      info.full_name,
+                        "is_verified":    info.is_verified,
+                        "post_type":      info.post_type,
+                        "taken_at_str":   info.taken_at_str,
+                        "likes":          info.likes,
+                        "comments":       info.comments,
+                        "view_count":     info.view_count,
+                        "play_count":     info.play_count,
+                        "carousel_count": info.carousel_count,
+                        "caption":        info.caption,
+                        "hashtags":       info.hashtags,
+                        "usertags":       info.usertags,
+                        "mentions":       info.mentions,
+                        "music_artist":   info.music_artist,
+                        "music_title":    info.music_title,
+                        "location_name":  info.location.name if info.location else "",
+                        "post_url":       info.post_url,
+                    }
+                except FetchError as e:
+                    return {"shortcode": sc, "ok": False, "error": str(e)}
+                except Exception as e:
+                    return {"shortcode": sc, "ok": False, "error": f"parse_error: {e}"}
+
+        return list(await asyncio.gather(*[_one(sc) for sc in shortcodes]))
+
+    # ── Similar accounts ──────────────────────────────────────────────────────
+
+    async def fetch_similar_accounts(
+        self,
+        username: str,
+        limit: int = 20,
+        cache_ttl: Optional[int] = None,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        Fetch accounts similar to a given user via Instagram's chaining API.
+
+        🔐 Requires authentication (cookies).
+        Returns a list of account dicts or None if auth is unavailable.
+        """
+        cm = self._cookie_manager
+        if cm is None or not getattr(cm, "is_authenticated", False):
+            return None
+
+        user = await self.fetch_user(username)
+        if user is None:
+            raise FetchError(f"User @{username} not found")
+        user_pk = str(user.get("pk") or user.get("id") or "")
+        if not user_pk:
+            raise FetchError(f"Could not resolve user_pk for @{username}")
+
+        ttl = cache_ttl if cache_ttl is not None else 600
+        cache_key = f"similar:{user_pk}:{limit}"
+
+        async def _do_fetch() -> Optional[List[Dict]]:
+            session = await self._get_auth_session()
+            cm2 = self._cookie_manager
+            csrf = (cm2.cookies.get("csrftoken", "") if cm2 else "") or ""
+            headers = {
+                "x-csrftoken":      csrf,
+                "x-ig-app-id":      self._config.ig_app_id,
+                "x-requested-with": "XMLHttpRequest",
+                "User-Agent":       self._config.ig_user_agent,
+            }
+            url = "https://i.instagram.com/api/v1/discover/chaining/"
+
+            for attempt in range(3):
+                try:
+                    resp = await session.get(
+                        url, params={"target_id": user_pk},
+                        headers=headers, timeout=15,
+                    )
+                except Exception as exc:
+                    if attempt == 2:
+                        raise FetchError(f"similar_accounts request failed: {exc}") from exc
+                    await asyncio.sleep(1)
+                    continue
+
+                if resp.status_code == 401:
+                    return None
+                if resp.status_code == 404:
+                    raise FetchError(f"User {username} not found")
+                if resp.status_code != 200:
+                    raise FetchError(f"similar_accounts HTTP {resp.status_code}")
+
+                users_raw = resp.json().get("users") or []
+                accounts = []
+                for u in users_raw[:limit]:
+                    accounts.append({
+                        "username":        u.get("username", ""),
+                        "full_name":       u.get("full_name", ""),
+                        "pk":              str(u.get("pk", "")),
+                        "is_verified":     bool(u.get("is_verified")),
+                        "is_private":      bool(u.get("is_private")),
+                        "follower_count":  u.get("follower_count"),
+                        "biography":       u.get("biography", ""),
+                        "profile_pic_url": u.get("profile_pic_url", ""),
+                        "category":        u.get("category_name") or u.get("category", ""),
+                    })
+                return accounts
+
+        return await self._cache.get_or_fetch(cache_key, _do_fetch, ttl=ttl)
+
     # ── Search ────────────────────────────────────────────────────────────────
 
     async def fetch_search(

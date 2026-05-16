@@ -1,21 +1,8 @@
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# Mock the mcp module before importing anything that uses it
-class MockToolError(Exception):
-    pass
-
-mock_exceptions_mod = MagicMock()
-mock_exceptions_mod.ToolError = MockToolError
-
-mock_fastmcp_mod = MagicMock()
-mock_fastmcp_mod.Context = MagicMock
-mock_fastmcp_mod.FastMCP = MagicMock
-
-sys.modules["mcp"] = MagicMock()
-sys.modules["mcp.server"] = MagicMock()
-sys.modules["mcp.server.fastmcp"] = mock_fastmcp_mod
-sys.modules["mcp.server.fastmcp.exceptions"] = mock_exceptions_mod
+# MCP module mocks are set up in conftest.py (loaded before any test file).
+MockToolError = sys.modules["mcp.server.fastmcp.exceptions"].ToolError
 
 import pytest
 from instagram_mcp.tools import register_tools, sanitize_username, _tool_error, _exception_to_tool_error
