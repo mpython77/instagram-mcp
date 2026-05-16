@@ -51,17 +51,6 @@ uv sync
 uv run instagram-mcp
 ```
 
-### Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| `mcp[cli]>=1.0.0` | MCP server protocol |
-| `curl-cffi>=0.7.0` | Chrome TLS impersonation |
-| `pydantic>=2.0.0` | Input validation |
-| `aiofiles>=23.0` | Async file I/O for exports |
-| `Pillow>=10.0.0` | PNG→JPEG conversion for uploads |
-| `uvloop>=0.20` | Fast event loop (Linux/macOS) |
-
 ### cookies.txt Setup (for authenticated tools)
 
 1. Log in to Instagram in your browser.
