@@ -306,16 +306,15 @@ async def test_run_stop_flag_during_execution(mock_load_targets):
     runner._load_existing_results = MagicMock(return_value={})
     runner._save_progress = MagicMock()
     
-    async def slow_scrape(u, sem):
+    async def slow_scrape(u):
         if u == "u1":
             runner._stop_flag = True
             return {"username": u, "status": "active"}
-        # ensure other tasks are still pending/running so t.cancel() hits line 194
         await asyncio.sleep(0.5)
         return {"username": u, "status": "active"}
-        
-    runner._scrape_one = AsyncMock(side_effect=slow_scrape)
-    
+
+    runner._scrape_one_no_semaphore = AsyncMock(side_effect=slow_scrape)
+
     await runner.run()
     assert runner._stats.completed <= 1
 
@@ -331,15 +330,15 @@ async def test_run_exceptions(mock_load_targets):
     runner._load_existing_results = MagicMock(return_value={})
     runner._save_progress = MagicMock()
     
-    # 1. CancelledError
-    runner._scrape_one = AsyncMock(side_effect=asyncio.CancelledError())
+    # 1. CancelledError — re-raised by worker, never put in output_q → error stays 0
+    runner._scrape_one_no_semaphore = AsyncMock(side_effect=asyncio.CancelledError())
     await runner.run()
-    assert runner._stats.error == 0  # CancelledError is skipped
-    
-    # 2. Generic Exception
-    runner._scrape_one = AsyncMock(side_effect=Exception("generic error"))
+    assert runner._stats.error == 0
+
+    # 2. Generic Exception — worker catches it, creates error result → error == 1
+    runner._scrape_one_no_semaphore = AsyncMock(side_effect=Exception("generic error"))
     await runner.run()
-    assert runner._stats.error == 0  # The error is caught, loop continues, but stats not updated because result not returned
+    assert runner._stats.error == 1
 
 @pytest.mark.asyncio
 async def test_run_loop_exceptions():
