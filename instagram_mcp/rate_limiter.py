@@ -200,3 +200,111 @@ class AdaptiveRateLimiter:
             "consecutive_429s": self._consecutive_429s,
             **self.get_metrics(),
         }
+
+
+class PerProxyRateLimiter:
+    """
+    Per-proxy token-bucket rate limiter.
+
+    Each proxy (IP) gets its own `AdaptiveRateLimiter` so the limit is
+    enforced per egress IP rather than globally. This matches Instagram's
+    real per-IP throttling (~0.05–1 RPS per IP) instead of an
+    optimistic global rate.
+
+    Public API:
+      - await acquire(proxy_url)         — get one token from that proxy's bucket
+      - await on_rate_limited(proxy_url) — slow down that proxy's bucket
+      - await on_success(proxy_url)      — speed it back up
+      - get_limiter(proxy_url)           — direct access (sync, used by stats)
+      - stats                            — aggregate snapshot
+    """
+
+    __slots__ = (
+        "_rate", "_burst", "_min_rate",
+        "_backoff_factor", "_recovery_factor",
+        "_circuit_breaker_threshold", "_circuit_breaker_cooldown",
+        "_request_jitter",
+        "_limiters", "_lock",
+    )
+
+    def __init__(
+        self,
+        rate: float = 1.0,
+        burst: int = 3,
+        min_rate: float = 0.1,
+        backoff_factor: float = 0.5,
+        recovery_factor: float = 1.2,
+        circuit_breaker_threshold: int = 5,
+        circuit_breaker_cooldown: float = 60.0,
+        request_jitter: float = 0.1,
+    ):
+        self._rate = rate
+        self._burst = burst
+        self._min_rate = min_rate
+        self._backoff_factor = backoff_factor
+        self._recovery_factor = recovery_factor
+        self._circuit_breaker_threshold = circuit_breaker_threshold
+        self._circuit_breaker_cooldown = circuit_breaker_cooldown
+        self._request_jitter = request_jitter
+        self._limiters: dict[str, AdaptiveRateLimiter] = {}
+        self._lock = asyncio.Lock()
+
+    def _make_limiter(self) -> AdaptiveRateLimiter:
+        return AdaptiveRateLimiter(
+            rate=self._rate,
+            burst=self._burst,
+            min_rate=self._min_rate,
+            backoff_factor=self._backoff_factor,
+            recovery_factor=self._recovery_factor,
+            circuit_breaker_threshold=self._circuit_breaker_threshold,
+            circuit_breaker_cooldown=self._circuit_breaker_cooldown,
+            request_jitter=self._request_jitter,
+        )
+
+    async def _get_or_create(self, proxy_url: str) -> AdaptiveRateLimiter:
+        # Fast path
+        lim = self._limiters.get(proxy_url)
+        if lim is not None:
+            return lim
+        async with self._lock:
+            lim = self._limiters.get(proxy_url)
+            if lim is None:
+                lim = self._make_limiter()
+                self._limiters[proxy_url] = lim
+            return lim
+
+    def get_limiter(self, proxy_url: str) -> AdaptiveRateLimiter | None:
+        """Return existing limiter for proxy_url (no create); None if absent."""
+        return self._limiters.get(proxy_url)
+
+    async def acquire(self, proxy_url: str) -> float:
+        """Acquire one token from this proxy's bucket. Waits as needed."""
+        lim = await self._get_or_create(proxy_url)
+        return await lim.acquire()
+
+    async def on_rate_limited(self, proxy_url: str) -> None:
+        """429 on this proxy — slow it down (does not affect other proxies)."""
+        lim = await self._get_or_create(proxy_url)
+        await lim.on_rate_limited()
+
+    async def on_success(self, proxy_url: str) -> None:
+        """Success on this proxy — speed it back up."""
+        lim = await self._get_or_create(proxy_url)
+        await lim.on_success()
+
+    @property
+    def stats(self) -> dict:
+        """Aggregate snapshot — one entry per proxy + summary."""
+        return {
+            "proxies_tracked": len(self._limiters),
+            "default_rps": self._rate,
+            "default_burst": self._burst,
+            "per_proxy": {
+                url: {
+                    "current_rps": lim.stats["current_rps"],
+                    "total_requests": lim.stats["total_requests"],
+                    "total_429s": lim.stats["total_429s"],
+                }
+                for url, lim in self._limiters.items()
+            },
+        }

@@ -7,6 +7,7 @@ Environment variables:
     INSTAGRAM_MCP_TIMEOUT          — Request timeout in seconds (default: 10)
     INSTAGRAM_MCP_MAX_RETRIES      — Max retry count (default: 3)
     INSTAGRAM_MCP_MAX_WORKERS      — Default concurrency for batch operations (default: 12)
+    INSTAGRAM_MCP_MAX_CLIENTS      — curl_cffi AsyncSession internal handle pool size (default: 50)
     INSTAGRAM_MCP_PROXIES          — Proxy URLs separated by comma (or proxies.txt)
     INSTAGRAM_MCP_PROXY_MAX_FAILS  — Proxy max consecutive fails (default: 5)
     INSTAGRAM_MCP_PROXY_COOLDOWN   — Proxy cooldown in seconds (default: 30)
@@ -26,6 +27,9 @@ Environment variables:
     INSTAGRAM_MCP_EXPORT_ENABLED   — '0' or 'false' disables JSON auto-save (default: enabled)
     INSTAGRAM_MCP_EXPORT_DIR       — Directory for saved JSON files (default: ./exports)
     INSTAGRAM_MCP_EXPORT_INDENT    — JSON indentation spaces, 0 = compact (default: 2)
+    INSTAGRAM_MCP_TOOLSETS         — Comma-separated toolset names to enable, or 'all' (default).
+                                     Valid: profile, analysis, content, social_graph, batch, server, all
+    INSTAGRAM_MCP_HIDE_AUTH_WHEN_NO_COOKIES — '1'/'true' hides auth-only tools when no cookies are loaded
 """
 
 from __future__ import annotations
@@ -56,6 +60,11 @@ class MCPConfig:
     request_timeout: int = 10
     max_retries: int = 3              # 3 retries = 3 different proxies
     max_workers: int = 12
+    # curl_cffi AsyncSession's internal libcurl handle pool size.
+    # Default in curl_cffi is 10 — catastrophic for 50-100 worker batch jobs
+    # because all coroutines on the same proxy session contend for 10 handles.
+    # Raise to 50 so high-concurrency batches actually run in parallel.
+    async_max_clients: int = 50
 
     # ── Cache ────────────────────────────────────────────────────────────────
     cache_enabled: bool = True
@@ -86,6 +95,20 @@ class MCPConfig:
 
     # Proxy
     proxy_max_cooldown: float = 300.0         # Max proxy cooldown in seconds
+
+    # ── Per-proxy circuit breaker (3-state CLOSED / OPEN / HALF_OPEN) ─────────
+    proxy_cb_fail_threshold: int = 3          # consecutive failures → OPEN
+    proxy_cb_open_cooldown: float = 30.0      # initial OPEN cooldown (seconds)
+    proxy_cb_max_cooldown: float = 300.0      # max OPEN cooldown (5 min)
+    proxy_max_concurrent: int = 30            # per-proxy bulkhead (concurrent reqs)
+
+    # ── Per-proxy rate limiter (token bucket per IP) ─────────────────────────
+    per_proxy_rate_rps: float = 1.0           # Instagram realistic limit per IP
+    per_proxy_rate_burst: int = 3
+
+    # ── Retry jitter (Gaussian) ──────────────────────────────────────────────
+    retry_base_delay: float = 0.5             # base delay between retries (seconds)
+    retry_jitter_std: float = 0.5             # Gaussian std-dev for sleep jitter
 
     # Jitter
     request_jitter: float = 0.1              # Max jitter added to token-bucket sleep (seconds)
@@ -124,6 +147,17 @@ class MCPConfig:
     # ── Authentication (cookies.txt) ─────────────────────────────────────────
     cookies_path: str = ""            # Override via INSTAGRAM_MCP_COOKIES env var
 
+    # ── Toolsets (tool registration gating) ──────────────────────────────────
+    # Controls which groups of MCP tools are registered at startup.
+    # Empty set or {"all"} means register every group.
+    # Valid names: profile, analysis, content, social_graph, batch, server.
+    # The "server" group (instagram_server) is always enabled regardless.
+    enabled_toolsets: Set[str] = field(default_factory=lambda: {"all"})
+    # Hide auth-only tools (instagram_search, instagram_tagged_by, instagram_reposts,
+    # instagram_reels, instagram_stories, instagram_highlights, instagram_followers_list,
+    # instagram_following_list, instagram_post_likers) when no cookies are loaded.
+    hide_auth_when_no_cookies: bool = False
+
     # ── Bio Link Filtering ───────────────────────────────────────────────────
     social_domains: Set[str] = field(default_factory=lambda: {
         "tiktok.com", "youtube.com", "twitter.com", "x.com",
@@ -152,6 +186,8 @@ class MCPConfig:
             cfg.max_retries = int(v)
         if v := os.environ.get("INSTAGRAM_MCP_MAX_WORKERS"):
             cfg.max_workers = int(v)
+        if v := os.environ.get("INSTAGRAM_MCP_MAX_CLIENTS"):
+            cfg.async_max_clients = max(1, int(v))
 
         # Cache
         if os.environ.get("INSTAGRAM_MCP_CACHE_DISABLED", "").lower() in ("1", "true"):
@@ -196,6 +232,28 @@ class MCPConfig:
         if v := os.environ.get("INSTAGRAM_MCP_REQUEST_JITTER"):
             cfg.request_jitter = float(v)
 
+        # Per-proxy circuit breaker / bulkhead
+        if v := os.environ.get("INSTAGRAM_MCP_PROXY_CB_FAIL_THRESHOLD"):
+            cfg.proxy_cb_fail_threshold = max(1, int(v))
+        if v := os.environ.get("INSTAGRAM_MCP_PROXY_CB_OPEN_COOLDOWN"):
+            cfg.proxy_cb_open_cooldown = float(v)
+        if v := os.environ.get("INSTAGRAM_MCP_PROXY_CB_MAX_COOLDOWN"):
+            cfg.proxy_cb_max_cooldown = float(v)
+        if v := os.environ.get("INSTAGRAM_MCP_PROXY_MAX_CONCURRENT"):
+            cfg.proxy_max_concurrent = max(1, int(v))
+
+        # Per-proxy token-bucket
+        if v := os.environ.get("INSTAGRAM_MCP_PER_PROXY_RPS"):
+            cfg.per_proxy_rate_rps = float(v)
+        if v := os.environ.get("INSTAGRAM_MCP_PER_PROXY_BURST"):
+            cfg.per_proxy_rate_burst = max(1, int(v))
+
+        # Retry jitter
+        if v := os.environ.get("INSTAGRAM_MCP_RETRY_BASE_DELAY"):
+            cfg.retry_base_delay = float(v)
+        if v := os.environ.get("INSTAGRAM_MCP_RETRY_JITTER_STD"):
+            cfg.retry_jitter_std = float(v)
+
         # GraphQL pagination
         if v := os.environ.get("INSTAGRAM_MCP_GRAPHQL_DOC_ID"):
             cfg.ig_graphql_doc_id = v
@@ -213,6 +271,13 @@ class MCPConfig:
             cfg.export_dir = v
         if v := os.environ.get("INSTAGRAM_MCP_EXPORT_INDENT"):
             cfg.export_indent = int(v)
+
+        # Toolset selection
+        if v := os.environ.get("INSTAGRAM_MCP_TOOLSETS"):
+            parts = {p.strip().lower() for p in v.split(",") if p.strip()}
+            cfg.enabled_toolsets = parts or {"all"}
+        if os.environ.get("INSTAGRAM_MCP_HIDE_AUTH_WHEN_NO_COOKIES", "").lower() in ("1", "true"):
+            cfg.hide_auth_when_no_cookies = True
 
         return cfg
 

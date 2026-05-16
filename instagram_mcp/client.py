@@ -130,6 +130,7 @@ class InstagramClient:
                 impersonate=self._config.ig_impersonate,
                 proxies=proxies,
                 timeout=self._config.request_timeout,
+                max_clients=self._config.async_max_clients,
             )
             # Evict oldest session if pool exceeds limit
             MAX_POOL_SIZE = 50
@@ -176,6 +177,7 @@ class InstagramClient:
                     impersonate=self._config.ig_impersonate,
                     timeout=self._config.request_timeout,
                     cookies=(cm.cookies if cm else {}),
+                    max_clients=self._config.async_max_clients,
                 )
             return self._auth_session
 

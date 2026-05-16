@@ -27,6 +27,7 @@ def mock_config():
     config.cache_reposts_ttl = 600
     config.cache_reels_ttl = 600
     config.cache_comments_ttl = 600
+    config.async_max_clients = 50
     return config
 
 @pytest.fixture
@@ -109,7 +110,8 @@ async def test_get_session_with_proxy(client):
             headers=client.config.ig_headers,
             impersonate=client.config.ig_impersonate,
             proxies={"http": proxy, "https": proxy},
-            timeout=client.config.request_timeout
+            timeout=client.config.request_timeout,
+            max_clients=client.config.async_max_clients,
         )
 
 @pytest.mark.asyncio
