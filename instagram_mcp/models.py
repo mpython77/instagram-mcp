@@ -19,7 +19,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def _parse_user_date(s: str) -> Optional[int]:
@@ -1462,5 +1462,317 @@ class UploadPhotoInput(BaseModel):
         description=(
             "Optional Instagram location ID to tag the post. "
             "Get the ID from instagram_location_posts or from instagram_post details."
+        ),
+    )
+
+
+# ── DM Tools ─────────────────────────────────────────────────────────────────
+
+class DMInboxInput(BaseModel):
+    """Input for instagram_dm_inbox tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    limit: int = Field(
+        default=20,
+        ge=1,
+        le=50,
+        description="Number of threads to return (1-50). Default 20.",
+    )
+    cursor: str = Field(
+        default="",
+        description="Pagination cursor from a previous call's oldest_cursor field.",
+    )
+
+
+class DMThreadInput(BaseModel):
+    """Input for instagram_dm_thread tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    thread_id: str = Field(
+        ...,
+        description="Thread ID from instagram_dm_inbox results.",
+        min_length=1,
+    )
+    limit: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        description="Number of messages to return (1-100). Default 20.",
+    )
+    cursor: str = Field(
+        default="",
+        description="Pagination cursor (prev_cursor from previous result) to load older messages.",
+    )
+
+
+class DMSendInput(BaseModel):
+    """Input for instagram_dm_send tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    thread_id: Optional[str] = Field(
+        default=None,
+        description="Thread igid from instagram_dm_inbox. Use to reply to an existing thread.",
+        min_length=1,
+    )
+    username: Optional[str] = Field(
+        default=None,
+        description="Instagram username (e.g. 'cristiano'). Resolves thread automatically.",
+        min_length=1,
+    )
+    text: str = Field(
+        ...,
+        description="Message text to send (max 1000 characters).",
+        min_length=1,
+        max_length=1000,
+    )
+
+    @model_validator(mode="after")
+    def require_thread_or_username(self) -> "DMSendInput":
+        if not self.thread_id and not self.username:
+            raise ValueError("Provide either thread_id or username.")
+        return self
+
+
+# ── Schedule Tool ─────────────────────────────────────────────────────────────
+
+class ScheduleInput(BaseModel):
+    """Input for instagram_schedule tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    action: str = Field(
+        ...,
+        description=(
+            "Action to perform:\n"
+            "  'add'    — schedule a new post\n"
+            "  'list'   — show pending scheduled posts\n"
+            "  'cancel' — cancel a scheduled post by ID\n"
+            "  'status' — show scheduler health"
+        ),
+    )
+    images: List[str] = Field(
+        default_factory=list,
+        description="[add only] Absolute paths to images to post (1-10).",
+    )
+    caption: str = Field(
+        default="",
+        max_length=2200,
+        description="[add only] Post caption (max 2200 chars).",
+    )
+    publish_at: str = Field(
+        default="",
+        description=(
+            "[add only] When to publish. Accepts:\n"
+            "  ISO format: '2026-05-20T15:00:00'\n"
+            "  Date only: '2026-05-20' (publishes at midnight UTC)\n"
+            "  Unix timestamp as string: '1716220800'"
+        ),
+    )
+    post_id: str = Field(
+        default="",
+        description="[cancel only] The 8-char post ID returned by 'add' action.",
+    )
+    location: str = Field(
+        default="",
+        description="[add only] Optional location string to tag in the post.",
+    )
+
+
+# ── Monitor Tool ──────────────────────────────────────────────────────────────
+
+class MonitorInput(BaseModel):
+    """Input for instagram_monitor tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    action: str = Field(
+        ...,
+        description=(
+            "Action to perform:\n"
+            "  'add'    — start monitoring an account\n"
+            "  'remove' — stop monitoring an account\n"
+            "  'list'   — show all active monitors\n"
+            "  'status' — show monitor service health\n"
+            "  'test'   — send a test webhook"
+        ),
+    )
+    username: str = Field(
+        default="",
+        description="[add/remove only] Instagram username to monitor (without @).",
+    )
+    webhook_url: str = Field(
+        default="",
+        description=(
+            "[add/test only] HTTPS URL to POST new-post notifications to.\n"
+            "Payload: {event, username, shortcode, post_url, caption, likes, timestamp, detected_at}"
+        ),
+    )
+    interval: int = Field(
+        default=300,
+        ge=60,
+        le=3600,
+        description="[add only] Polling interval in seconds (60-3600). Default 300 (5 min).",
+    )
+
+
+# ── OAuth Tool ────────────────────────────────────────────────────────────────
+
+class OAuthInput(BaseModel):
+    """Input for instagram_oauth tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    action: str = Field(
+        ...,
+        description=(
+            "Action to perform:\n"
+            "  'init_flow'    — generate the OAuth authorization URL to visit\n"
+            "  'exchange_code'— exchange the callback code for a token\n"
+            "  'refresh_token'— refresh the long-lived token before expiry\n"
+            "  'status'       — show current token status"
+        ),
+    )
+    code: str = Field(
+        default="",
+        description="[exchange_code only] The 'code' parameter from the OAuth callback URL.",
+    )
+    scopes: List[str] = Field(
+        default_factory=list,
+        description=(
+            "[init_flow only] OAuth scopes to request. Defaults to "
+            "['instagram_business_basic', 'instagram_business_manage_messages']."
+        ),
+    )
+
+
+# ── DM Actions ────────────────────────────────────────────────────────────────
+
+class DMReactInput(BaseModel):
+    """Input for instagram_dm_react tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    thread_id: str = Field(..., description="Thread ID from instagram_dm_inbox.", min_length=1)
+    item_id: str = Field(..., description="Message item_id to react to.", min_length=1)
+    emoji: str = Field(default="❤", description="Emoji reaction (default: ❤). Empty string to remove.")
+    action: str = Field(default="react", description="'react' to add reaction, 'unreact' to remove.")
+
+
+class DMUnsendInput(BaseModel):
+    """Input for instagram_dm_unsend tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    thread_id: str = Field(..., description="Thread ID from instagram_dm_inbox.", min_length=1)
+    item_id: str = Field(..., description="Message item_id to delete/unsend.", min_length=1)
+
+
+class DMMarkSeenInput(BaseModel):
+    """Input for instagram_dm_mark_seen tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    thread_id: str = Field(..., description="Thread ID to mark as seen.", min_length=1)
+    item_id: str = Field(..., description="item_id of the last message to mark as seen.", min_length=1)
+
+
+# ── Post Actions ───────────────────────────────────────────────────────────────
+
+class PostCommentInput(BaseModel):
+    """Input for instagram_post_comment tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    media_id: str = Field(..., description="Post media_id (numeric, e.g. '3612076889987614897').", min_length=1)
+    text: str = Field(..., description="Comment text to post.", min_length=1, max_length=2200)
+
+
+class PostSaveInput(BaseModel):
+    """Input for instagram_post_save tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    media_id: str = Field(..., description="Post media_id (numeric) to save or unsave.", min_length=1)
+    action: str = Field(default="save", description="'save' to bookmark, 'unsave' to remove bookmark.")
+
+
+# ── User Actions ───────────────────────────────────────────────────────────────
+
+class UserSearchInput(BaseModel):
+    """Input for instagram_user_search tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    query: str = Field(..., description="Search query (username or name).", min_length=1)
+    count: int = Field(default=10, ge=1, le=50, description="Number of results (1-50). Default 10.")
+
+
+class UserFollowersInput(BaseModel):
+    """Input for instagram_user_followers/following tools."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    user_id: str = Field(..., description="Numeric user ID.", min_length=1)
+    count: int = Field(default=50, ge=1, le=200, description="Number of users per page (1-200). Default 50.")
+    max_id: str = Field(default="", description="Pagination cursor (next_max_id from previous result).")
+
+
+class BlockUserInput(BaseModel):
+    """Input for instagram_block_user tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    user_id: str = Field(..., description="Numeric user ID to block or unblock.", min_length=1)
+    action: str = Field(default="block", description="'block' or 'unblock'.")
+
+
+# ── Story Actions ──────────────────────────────────────────────────────────────
+
+class StoryMarkSeenInput(BaseModel):
+    """Input for instagram_story_mark_seen tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    reel_ids: List[str] = Field(
+        ...,
+        description=(
+            "List of story item IDs (media_id) to mark as seen. "
+            "Get these from instagram_stories tool."
+        ),
+        min_length=1,
+    )
+    owner_ids: List[str] = Field(
+        ...,
+        description="List of owner user IDs corresponding to each reel_id.",
+        min_length=1,
+    )
+    taken_ats: List[int] = Field(
+        ...,
+        description="List of taken_at timestamps (Unix seconds) for each story.",
+        min_length=1,
+    )
+
+
+class StoryReplyInput(BaseModel):
+    """Input for instagram_story_reply tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    username: str = Field(..., description="Story owner's Instagram username.", min_length=1)
+    text: str = Field(..., description="Reply message text.", min_length=1, max_length=1000)
+
+
+# ── Profile Edit ───────────────────────────────────────────────────────────────
+
+class EditProfileInput(BaseModel):
+    """Input for instagram_edit_profile tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    biography: Optional[str] = Field(default=None, description="New bio text (max 150 chars).", max_length=150)
+    full_name: Optional[str] = Field(default=None, description="New display name.", max_length=30)
+    external_url: Optional[str] = Field(default=None, description="New website URL.")
+    email: Optional[str] = Field(default=None, description="New email address.")
+    phone_number: Optional[str] = Field(default=None, description="New phone number.")
+
+
+# ── Session Tool ──────────────────────────────────────────────────────────────
+
+class SessionInput(BaseModel):
+    """Input for instagram_sessions tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    action: str = Field(
+        default="list",
+        description=(
+            "Action to perform:\n"
+            "  'list' — show all loaded sessions and their auth status\n"
+            "  'status' — same as list but with more detail"
         ),
     )

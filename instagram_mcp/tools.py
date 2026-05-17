@@ -1,25 +1,46 @@
 """
-MCP Tool registration — 19 tools, optimised for LLM agents.
+MCP Tool registration — 26 tools, optimised for LLM agents.
 
 AUTH TIERS:
-  🌐 ANONYMOUS (10 tools) — no login, no cookies, fully public
-  🔐 AUTHENTICATED (8 tools) — requires cookies.txt with a valid Instagram session
+  🌐 ANONYMOUS (15 tools) — no login, no cookies, fully public
+  🔐 AUTHENTICATED (11 tools) — requires cookies.txt with a valid Instagram session
+  🌐/🔐 AUTO-MODE (1 tool) — works anonymously, upgrades when cookies present
 
 Tools:
-  1. instagram_profile          — 🌐 Profile + optional feed tags + activity status
-  2. instagram_feed_deep        — 🌐 Deep paginated feed analysis (up to 200 posts)
-  3. instagram_analyze_engagement — 🌐 ER%, content mix, best days, top posts
-  4. instagram_find_collab_network — 🌐 Collaboration/mention network map
-  5. instagram_compare_profiles  — 🌐 Side-by-side comparison (2-5 accounts)
-  6. instagram_bulk_check        — 🌐 Up to 20 profiles in parallel
-  7. instagram_batch_scrape      — 🌐 Large-scale scraping (up to 2000 profiles)
-  8. instagram_server            — 🌐 Server diagnostics + cache management
-  9. instagram_tagged_by         — 🔐 Posts where OTHERS tagged this account
- 10. instagram_reposts           — 🔐 Content this account reposted from others
- 11. instagram_post              — 🌐 Full details for a single post by shortcode/URL
- 12. instagram_reels             — 🔐 Account's own reels with play counts
- 13. instagram_post_comments     — 🌐 Comments on a post with per-comment like counts
- 14. instagram_stories           — 🔐 Active Stories with music, mentions, linked posts
+  --- Profile & Feed ---
+  1.  instagram_profile          — 🌐 Profile + optional feed tags + activity status
+  2.  instagram_feed_deep        — 🌐 Deep paginated feed analysis (up to 200 posts)
+  3.  instagram_bulk_check       — 🌐 Up to 20 profiles in parallel
+  4.  instagram_compare_profiles — 🌐 Side-by-side comparison (2-5 accounts)
+  --- Analysis ---
+  5.  instagram_analyze_engagement  — 🌐 ER%, content mix, best days, top posts
+  6.  instagram_find_collab_network — 🌐 Collaboration/mention network map
+  --- Content ---
+  7.  instagram_post             — 🌐 Full details for a single post by shortcode/URL
+  8.  instagram_post_comments    — 🌐 Comments on a post with per-comment like counts
+  9.  instagram_hashtag          — 🌐/🔐 Hashtag trending posts (auto-upgrades with auth)
+  10. instagram_hashtag_deep     — 🌐 Deep hashtag analytics: top accounts, best hour
+  11. instagram_location_posts   — 🌐 Posts by location ID
+  12. instagram_audio_reels      — 🌐 Reels clustered by trending audio
+  13. instagram_post_bulk        — 🌐 Parallel fetch of multiple posts
+  --- Social Graph ---
+  14. instagram_search           — 🔐 Search accounts and hashtags by keyword
+  15. instagram_followers_list   — 🔐 Recent followers of an account
+  16. instagram_following_list   — 🔐 Accounts a user follows (full pagination)
+  17. instagram_post_likers      — 🔐 Users who liked a post
+  18. instagram_tagged_by        — 🔐 Posts where OTHERS tagged this account
+  19. instagram_reposts          — 🔐 Content this account reposted from others
+  20. instagram_reels             — 🔐 Account's own reels with play counts
+  21. instagram_stories          — 🔐 Active Stories with music, mentions, linked posts
+  22. instagram_highlights       — 🔐 Story highlight collections
+  23. instagram_similar_accounts — 🌐 Discover accounts similar to a given one
+  --- Intelligence ---
+  24. instagram_niche_top        — 🌐 Top accounts in a niche by engagement
+  25. instagram_account_report   — 🌐 Full account intelligence report
+  --- Batch ---
+  26. instagram_batch_scrape     — 🌐 Large-scale scraping (up to 2000 profiles)
+  --- Server ---
+  27. instagram_server           — 🌐 Server diagnostics + cache management
 
 Architecture:
   - Every tool has ctx: Context → MCP-native progress + logging (all async)
@@ -76,6 +97,13 @@ from .formatter import (
     format_reposts_markdown,
     format_stories_markdown,
     format_tagged_by_markdown,
+    format_dm_inbox_markdown,
+    format_dm_thread_markdown,
+    format_dm_send_markdown,
+    format_schedule_markdown,
+    format_monitor_markdown,
+    format_oauth_markdown,
+    format_sessions_markdown,
 )
 from .models import (
     AccountReportInput,
@@ -109,6 +137,24 @@ from .models import (
     StoriesInput,
     TaggedByInput,
     DownloadInput,
+    DMInboxInput,
+    DMThreadInput,
+    DMSendInput,
+    DMReactInput,
+    DMUnsendInput,
+    DMMarkSeenInput,
+    PostCommentInput,
+    PostSaveInput,
+    UserSearchInput,
+    UserFollowersInput,
+    BlockUserInput,
+    StoryMarkSeenInput,
+    StoryReplyInput,
+    EditProfileInput,
+    ScheduleInput,
+    MonitorInput,
+    OAuthInput,
+    SessionInput,
 )
 from .parser import (
     check_dead_account,
@@ -3140,3 +3186,865 @@ def register_tools(
 
             await ctx.info(f"instagram_download ✓ — {shortcode}, {len(ok_files)} files, {elapsed:.2f}s")
             return "\n".join(lines)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_dm_inbox
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_dm_inbox",
+            annotations={
+                "title": "Instagram DM Inbox",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_dm_inbox(params: DMInboxInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — List DM inbox threads.
+
+            Returns your most recent direct message conversations:
+            thread title, participants, unread status, last message preview.
+            Use thread_id from results to fetch full messages via instagram_dm_thread.
+
+            Args:
+                params: limit (1-50, default 20), cursor (pagination)
+            """
+            await ctx.info(f"instagram_dm_inbox: limit={params.limit}")
+            try:
+                data = await client.fetch_dm_inbox(
+                    limit=params.limit,
+                    cursor=params.cursor or None,
+                )
+                return format_dm_inbox_markdown(data)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+        @mcp.tool(
+            name="instagram_dm_thread",
+            annotations={
+                "title": "Instagram DM Thread",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_dm_thread(params: DMThreadInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Fetch messages in a DM thread.
+
+            Returns conversation messages in chronological order.
+            Supports pagination via cursor for older messages.
+
+            Args:
+                params: thread_id (from dm_inbox), limit (1-50), cursor
+            """
+            await ctx.info(f"instagram_dm_thread: {params.thread_id}")
+            try:
+                data = await client.fetch_dm_thread(
+                    thread_id=params.thread_id,
+                    limit=params.limit,
+                    cursor=params.cursor or None,
+                )
+                return format_dm_thread_markdown(data)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+        @mcp.tool(
+            name="instagram_dm_send",
+            annotations={
+                "title": "Instagram DM Send",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_dm_send(params: DMSendInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Send a text DM via Instagram Web GraphQL.
+
+            Provide either:
+            - username: Instagram handle (e.g. 'cristiano') — resolves thread automatically
+            - thread_id: igid from instagram_dm_inbox — sends to existing thread
+
+            Args:
+                params: username OR thread_id, plus text (max 1000 chars)
+            """
+            target = params.username or params.thread_id
+            await ctx.info(f"instagram_dm_send: target={target}, len={len(params.text)}")
+            try:
+                if params.username:
+                    data = await client.send_dm_to_username(
+                        username=params.username,
+                        text=params.text,
+                    )
+                else:
+                    data = await client.send_dm_text(
+                        thread_id=params.thread_id,
+                        text=params.text,
+                    )
+                return format_dm_send_markdown(data)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_dm_react
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_dm_react",
+            annotations={
+                "title": "Instagram DM Reaction",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_dm_react(params: DMReactInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Add or remove an emoji reaction to a DM message.
+
+            Args:
+                params: thread_id, item_id, emoji (default ❤), action (react/unreact)
+            """
+            await ctx.info(f"instagram_dm_react: thread={params.thread_id} item={params.item_id} action={params.action}")
+            try:
+                if params.action == "unreact":
+                    data = await client.dm_unreact(params.thread_id, params.item_id)
+                else:
+                    data = await client.dm_react(params.thread_id, params.item_id, params.emoji)
+                return f"✅ {data['status'].capitalize()}: {data.get('emoji', '')} on message {data['item_id'][:20]}..."
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_dm_unsend
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_dm_unsend",
+            annotations={
+                "title": "Instagram DM Unsend",
+                "readOnlyHint": False,
+                "destructiveHint": True,
+                "idempotentHint": False,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_dm_unsend(params: DMUnsendInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Delete/unsend a DM message (removes it for everyone).
+
+            Args:
+                params: thread_id, item_id
+            """
+            await ctx.info(f"instagram_dm_unsend: thread={params.thread_id} item={params.item_id}")
+            try:
+                data = await client.dm_unsend(params.thread_id, params.item_id)
+                return f"✅ Message deleted: {data['item_id'][:30]}..."
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_dm_mark_seen
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_dm_mark_seen",
+            annotations={
+                "title": "Instagram DM Mark Seen",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_dm_mark_seen(params: DMMarkSeenInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Mark a DM thread as seen up to a given message.
+
+            Args:
+                params: thread_id, item_id (last message to mark as read)
+            """
+            await ctx.info(f"instagram_dm_mark_seen: thread={params.thread_id}")
+            try:
+                data = await client.dm_mark_seen(params.thread_id, params.item_id)
+                return f"✅ Thread marked as seen up to message {data['item_id'][:30]}..."
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_post_comment
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_post_comment",
+            annotations={
+                "title": "Instagram Post Comment",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_post_comment(params: PostCommentInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Post a comment on an Instagram post.
+
+            Args:
+                params: media_id (numeric), text
+            """
+            await ctx.info(f"instagram_post_comment: media={params.media_id}")
+            try:
+                data = await client.post_comment(params.media_id, params.text)
+                return (
+                    f"✅ Commented on post {data['media_id']}\n"
+                    f"Comment ID: {data['comment_id']}\n"
+                    f"Text: {data['text']}"
+                )
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_user_search
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_user_search",
+            annotations={
+                "title": "Instagram User Search",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_user_search(params: UserSearchInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Search Instagram users by username or name.
+
+            Args:
+                params: query, count (1-50)
+            """
+            await ctx.info(f"instagram_user_search: query={params.query}")
+            try:
+                users = await client.search_users(params.query, params.count)
+                if not users:
+                    return f"No users found for '{params.query}'."
+                lines = [f"## Search: '{params.query}' — {len(users)} results\n"]
+                for u in users:
+                    verified = " ✓" if u["is_verified"] else ""
+                    private = " 🔒" if u["is_private"] else ""
+                    fc = f" | {u['follower_count']:,} followers" if u.get("follower_count") else ""
+                    lines.append(f"- **@{u['username']}**{verified}{private} — {u['full_name']}{fc}")
+                return "\n".join(lines)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_user_followers
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_user_followers",
+            annotations={
+                "title": "Instagram User Followers List",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_user_followers(params: UserFollowersInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Get followers list for a user by numeric user_id.
+
+            Args:
+                params: user_id (numeric), count (1-200), max_id (pagination cursor)
+            """
+            await ctx.info(f"instagram_user_followers: user_id={params.user_id}")
+            try:
+                data = await client.get_user_followers(
+                    params.user_id, params.count, params.max_id or None
+                )
+                users = data["users"]
+                lines = [f"## Followers of user {params.user_id} — {data['count']} shown\n"]
+                for u in users:
+                    verified = " ✓" if u["is_verified"] else ""
+                    private = " 🔒" if u["is_private"] else ""
+                    lines.append(f"- **@{u['username']}**{verified}{private} — {u['full_name']} (id: {u['user_id']})")
+                if data["has_more"]:
+                    lines.append(f"\n_More available. next_max_id: `{data['next_max_id']}`_")
+                return "\n".join(lines)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_user_following
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_user_following",
+            annotations={
+                "title": "Instagram User Following List",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_user_following(params: UserFollowersInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Get following list for a user by numeric user_id.
+
+            Args:
+                params: user_id (numeric), count (1-200), max_id (pagination cursor)
+            """
+            await ctx.info(f"instagram_user_following: user_id={params.user_id}")
+            try:
+                data = await client.get_user_following(
+                    params.user_id, params.count, params.max_id or None
+                )
+                users = data["users"]
+                lines = [f"## Following of user {params.user_id} — {data['count']} shown\n"]
+                for u in users:
+                    verified = " ✓" if u["is_verified"] else ""
+                    private = " 🔒" if u["is_private"] else ""
+                    lines.append(f"- **@{u['username']}**{verified}{private} — {u['full_name']} (id: {u['user_id']})")
+                if data["has_more"]:
+                    lines.append(f"\n_More available. next_max_id: `{data['next_max_id']}`_")
+                return "\n".join(lines)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_story_mark_seen
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_story_mark_seen",
+            annotations={
+                "title": "Instagram Story Mark Seen",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_story_mark_seen(params: StoryMarkSeenInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Mark stories as seen (viewed).
+
+            Args:
+                params: reel_ids (list of story media_ids), owner_ids (list of owner user_ids),
+                        taken_ats (list of taken_at Unix timestamps)
+            """
+            await ctx.info(f"instagram_story_mark_seen: {len(params.reel_ids)} stories")
+            try:
+                data = await client.story_mark_seen(
+                    params.reel_ids, params.owner_ids, params.taken_ats
+                )
+                return f"✅ Marked {data['count']} stories as seen."
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_story_reply
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_story_reply",
+            annotations={
+                "title": "Instagram Story Reply",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_story_reply(params: StoryReplyInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Reply to a story by sending a DM to the story owner.
+
+            Args:
+                params: username (story owner), text (reply message)
+            """
+            await ctx.info(f"instagram_story_reply: to @{params.username}")
+            try:
+                data = await client.story_reply(params.username, params.text)
+                return format_dm_send_markdown(data)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_edit_profile
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_edit_profile",
+            annotations={
+                "title": "Instagram Edit Profile",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_edit_profile(params: EditProfileInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Edit your Instagram profile (bio, name, website).
+
+            Only provide the fields you want to change. Others are kept as-is.
+
+            Args:
+                params: biography, full_name, external_url, email, phone_number
+            """
+            await ctx.info("instagram_edit_profile")
+            try:
+                data = await client.edit_profile(
+                    biography=params.biography,
+                    full_name=params.full_name,
+                    external_url=params.external_url,
+                    email=params.email,
+                    phone_number=params.phone_number,
+                )
+                return (
+                    f"✅ Profile updated!\n\n"
+                    f"**@{data['username']}** — {data['full_name']}\n"
+                    f"Bio: {data['biography']}\n"
+                    f"URL: {data['external_url']}"
+                )
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_post_save
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_post_save",
+            annotations={
+                "title": "Instagram Post Save/Unsave",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_post_save(params: PostSaveInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Save (bookmark) or unsave an Instagram post.
+
+            Args:
+                params: media_id (numeric post ID), action ('save' or 'unsave')
+            """
+            await ctx.info(f"instagram_post_save: media={params.media_id} action={params.action}")
+            try:
+                if params.action == "unsave":
+                    data = await client.post_unsave(params.media_id)
+                else:
+                    data = await client.post_save(params.media_id)
+                icon = "🗑️" if data["status"] == "unsaved" else "🔖"
+                return f"{icon} Post {data['status']}: media_id={data['media_id']}"
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_block_user
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_block_user",
+            annotations={
+                "title": "Instagram Block/Unblock User",
+                "readOnlyHint": False,
+                "destructiveHint": True,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_block_user(params: BlockUserInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Block or unblock an Instagram user by numeric user_id.
+
+            Args:
+                params: user_id (numeric), action ('block' or 'unblock')
+            """
+            await ctx.info(f"instagram_block_user: user_id={params.user_id} action={params.action}")
+            try:
+                if params.action == "unblock":
+                    data = await client.unblock_user(params.user_id)
+                else:
+                    data = await client.block_user(params.user_id)
+                icon = "🚫" if data["status"] == "blocked" else "✅"
+                return f"{icon} User {params.user_id} {data['status']}. blocking={data['blocking']}"
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_schedule
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("server"):
+
+        @mcp.tool(
+            name="instagram_schedule",
+            annotations={
+                "title": "Instagram Post Scheduler",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_schedule(params: ScheduleInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED for 'add' — Schedule posts for future publishing.
+
+            Actions:
+              add    — queue a post to be published at a specific date/time
+              list   — view all pending scheduled posts
+              cancel — cancel a pending post by ID
+              status — show scheduler health
+
+            Scheduled posts are stored locally and published automatically
+            when their scheduled time arrives (checked every 60 seconds).
+
+            Args:
+                params: action, images, caption, publish_at, post_id
+            """
+            from .scheduler import PostScheduler
+            import os as _os
+
+            scheduler: PostScheduler = getattr(mcp, "_post_scheduler", None)  # type: ignore[attr-defined]
+            if scheduler is None:
+                raise _tool_error(
+                    "Scheduler not initialized.",
+                    "config_error",
+                    "Restart the server — the scheduler should start automatically.",
+                )
+
+            action = params.action.lower().strip()
+            await ctx.info(f"instagram_schedule: action={action}")
+
+            try:
+                if action == "add":
+                    if not params.images:
+                        raise _tool_error("images required for action='add'", "validation_error")
+                    if not params.publish_at:
+                        raise _tool_error("publish_at required for action='add'", "validation_error")
+
+                    # Parse publish_at
+                    publish_ts = _parse_publish_at(params.publish_at)
+
+                    entry = await scheduler.add(
+                        images=params.images,
+                        caption=params.caption,
+                        publish_at=publish_ts,
+                        location=params.location,
+                    )
+                    return format_schedule_markdown("add", entry)
+
+                elif action == "list":
+                    pending = await scheduler.list_pending()
+                    return format_schedule_markdown("list", {"pending": pending})
+
+                elif action == "cancel":
+                    if not params.post_id:
+                        raise _tool_error("post_id required for action='cancel'", "validation_error")
+                    removed = await scheduler.cancel(params.post_id)
+                    return format_schedule_markdown("cancel", {"removed": removed, "post_id": params.post_id})
+
+                elif action == "status":
+                    stats = scheduler.stats()
+                    return format_schedule_markdown("status", stats)
+
+                else:
+                    raise _tool_error(
+                        f"Unknown action '{action}'",
+                        "validation_error",
+                        "Valid actions: add, list, cancel, status",
+                    )
+            except ToolError:
+                raise
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_monitor
+    # ─────────────────────────────────────────────────────────────────────────
+
+        @mcp.tool(
+            name="instagram_monitor",
+            annotations={
+                "title": "Instagram Account Monitor",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "openWorldHint": True,
+            },
+        )
+        async def instagram_monitor(params: MonitorInput, ctx: Context) -> str:
+            """
+            🌐 Monitor Instagram accounts for new posts via webhook.
+
+            Polls accounts at a configurable interval and sends an HTTP POST
+            to your webhook URL when new content is detected.
+
+            Actions:
+              add    — start monitoring an account (webhook URL required)
+              remove — stop monitoring an account
+              list   — view all active monitors
+              status — show monitor service health
+              test   — send a test webhook to verify your URL works
+
+            Webhook payload:
+              {event, username, shortcode, post_url, caption, likes, timestamp, detected_at}
+
+            Args:
+                params: action, username, webhook_url, interval (60-3600s)
+            """
+            from .monitor import AccountMonitor
+
+            monitor: AccountMonitor = getattr(mcp, "_account_monitor", None)  # type: ignore[attr-defined]
+            if monitor is None:
+                raise _tool_error(
+                    "Monitor service not initialized.",
+                    "config_error",
+                    "Restart the server — the monitor should start automatically.",
+                )
+
+            action = params.action.lower().strip()
+            await ctx.info(f"instagram_monitor: action={action}")
+
+            try:
+                if action == "add":
+                    username = params.username.strip().lstrip("@").lower()
+                    if not username:
+                        raise _tool_error("username required for action='add'", "validation_error")
+                    if not params.webhook_url:
+                        raise _tool_error("webhook_url required for action='add'", "validation_error")
+                    entry = await monitor.add(
+                        username=username,
+                        webhook_url=params.webhook_url,
+                        interval=params.interval,
+                    )
+                    return format_monitor_markdown("add", entry)
+
+                elif action == "remove":
+                    username = params.username.strip().lstrip("@").lower()
+                    if not username:
+                        raise _tool_error("username required for action='remove'", "validation_error")
+                    removed = monitor.remove(username)
+                    return format_monitor_markdown("remove", {"removed": removed, "username": username})
+
+                elif action == "list":
+                    entries = monitor.list_active()
+                    return format_monitor_markdown("list", {"monitors": entries})
+
+                elif action == "status":
+                    stats = monitor.stats()
+                    return format_monitor_markdown("status", stats)
+
+                elif action == "test":
+                    if not params.webhook_url:
+                        raise _tool_error("webhook_url required for action='test'", "validation_error")
+                    username = params.username or "test"
+                    success = await monitor.test_webhook(params.webhook_url, username)
+                    return format_monitor_markdown("test", {"success": success, "webhook_url": params.webhook_url})
+
+                else:
+                    raise _tool_error(
+                        f"Unknown action '{action}'",
+                        "validation_error",
+                        "Valid actions: add, remove, list, status, test",
+                    )
+            except ToolError:
+                raise
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_sessions
+    # ─────────────────────────────────────────────────────────────────────────
+
+        @mcp.tool(
+            name="instagram_sessions",
+            annotations={
+                "title": "Instagram Multi-Account Sessions",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_sessions(params: SessionInput, ctx: Context) -> str:
+            """
+            🌐 View all loaded Instagram sessions (multi-account support).
+
+            Shows all named sessions loaded from environment variables.
+            To add sessions, set INSTAGRAM_MCP_COOKIES_<ALIAS>=<path>.
+
+            Example env vars:
+              INSTAGRAM_MCP_COOKIES=cookies.txt        → alias 'default'
+              INSTAGRAM_MCP_COOKIES_BRAND=brand.txt    → alias 'brand'
+              INSTAGRAM_MCP_COOKIES_AGENCY=agency.txt  → alias 'agency'
+
+            Args:
+                params: action ('list' or 'status')
+            """
+            from .session_manager import SessionManager
+
+            session_mgr: SessionManager = getattr(mcp, "_session_manager", None)  # type: ignore[attr-defined]
+            if session_mgr is None:
+                return "## Sessions\n\nNo session manager initialized."
+
+            status = session_mgr.status()
+            authed = len(session_mgr.authenticated_aliases())
+            return format_sessions_markdown({
+                "sessions": status,
+                "authenticated_count": authed,
+            })
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_oauth
+    # ─────────────────────────────────────────────────────────────────────────
+
+        @mcp.tool(
+            name="instagram_oauth",
+            annotations={
+                "title": "Instagram OAuth Manager",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "openWorldHint": True,
+            },
+        )
+        async def instagram_oauth(params: OAuthInput, ctx: Context) -> str:
+            """
+            Manage Instagram Graph API OAuth 2.0 tokens.
+
+            Provides a complete OAuth flow for official Instagram Graph API access
+            (business/creator accounts). Works alongside cookies-based tools.
+
+            Actions:
+              init_flow     — generate the authorization URL to visit in browser
+              exchange_code — exchange the callback 'code' for a long-lived token
+              refresh_token — refresh the token before it expires (60-day cycle)
+              status        — show token validity and expiry
+
+            Prerequisites:
+              Set env vars: INSTAGRAM_MCP_OAUTH_APP_ID, INSTAGRAM_MCP_OAUTH_APP_SECRET,
+              INSTAGRAM_MCP_OAUTH_REDIRECT_URI
+
+            Args:
+                params: action, code (for exchange_code), scopes (for init_flow)
+            """
+            from .oauth_manager import OAuthManager
+
+            oauth: OAuthManager = getattr(mcp, "_oauth_manager", None)  # type: ignore[attr-defined]
+            if oauth is None:
+                return format_oauth_markdown("status", {
+                    "configured": False,
+                    "has_token": False,
+                    "token_valid": False,
+                })
+
+            action = params.action.lower().strip()
+            await ctx.info(f"instagram_oauth: action={action}")
+
+            try:
+                if action == "init_flow":
+                    scopes = params.scopes or None
+                    url = oauth.get_auth_url(scopes=scopes)
+                    return format_oauth_markdown("init_flow", {"auth_url": url})
+
+                elif action == "exchange_code":
+                    if not params.code:
+                        raise _tool_error("code required for action='exchange_code'", "validation_error")
+                    result = await oauth.exchange_code(params.code)
+                    return format_oauth_markdown("exchange_code", result)
+
+                elif action == "refresh_token":
+                    result = await oauth.refresh_token()
+                    return format_oauth_markdown("refresh_token", result)
+
+                elif action == "status":
+                    return format_oauth_markdown("status", oauth.status())
+
+                else:
+                    raise _tool_error(
+                        f"Unknown action '{action}'",
+                        "validation_error",
+                        "Valid actions: init_flow, exchange_code, refresh_token, status",
+                    )
+            except ToolError:
+                raise
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPERS for new tools
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _parse_publish_at(value: str) -> int:
+    """Parse a human-readable or timestamp string to Unix timestamp."""
+    from datetime import datetime, timezone
+
+    value = value.strip()
+    if value.isdigit():
+        return int(value)
+
+    formats = [
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+        "%d.%m.%Y %H:%M",
+        "%d.%m.%Y",
+    ]
+    for fmt in formats:
+        try:
+            dt = datetime.strptime(value, fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return int(dt.timestamp())
+        except ValueError:
+            continue
+    raise ValueError(
+        f"Cannot parse publish_at value: {value!r}. "
+        "Use ISO format like '2026-05-20T15:00:00' or Unix timestamp."
+    )
