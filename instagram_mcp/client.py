@@ -181,12 +181,39 @@ class InstagramClient:
                     max_clients=self._config.async_max_clients,
                 )
                 # Set each cookie with domain=".instagram.com" so libcurl sends them
-                # to ALL subdomains (www.instagram.com, i.instagram.com, etc.)
+                # to ALL subdomains (www.instagram.com, i.instagram.com, etc.).
+                # Use raw values (no octal decode) — the raw rur works for API requests.
+                # The rur redirect-loop issue only affects homepage fetches, which now
+                # use an anonymous HTTP/1.1 session that doesn't need any cookies.
                 if cm and cm.cookies:
                     for name, value in cm.cookies.items():
                         session.cookies.set(name, value, domain=".instagram.com")
                 self._auth_session = session
             return self._auth_session
+
+    @staticmethod
+    def _decode_cookie_value(value: str) -> str:
+        """Decode octal-escaped characters in cookie values.
+
+        Cookie-Editor exports cookies with octal escapes (e.g. \\054 for comma).
+        curl_cffi/libcurl interprets these differently from requests, causing
+        the rur routing cookie to be mangled and trigger infinite redirect loops.
+        Decoding them to real characters before passing to curl_cffi avoids this.
+        """
+        import re as _re
+        return _re.sub(r'\x5c[0-9]{3}', lambda m: chr(int(m.group(0)[1:], 8)), value)
+
+    def _cookie_str(self) -> str:
+        """Build a Cookie header string from raw cookie dict, preserving exact values.
+
+        Passes cookies directly as a Cookie header to bypass curl_cffi's cookie jar,
+        which can mangle quoted values like rur. Uses decoded octal escapes so that
+        Instagram's routing layer receives the correct rur value (e.g. commas not \\054).
+        """
+        cm = self._cookie_manager
+        if not cm:
+            return ""
+        return "; ".join(f"{k}={v}" for k, v in cm.cookies.items())
 
     async def close(self) -> None:
         """Cleanly shut down the client — close all pooled sessions."""
@@ -608,9 +635,17 @@ class InstagramClient:
                 page_result = cached_page
             else:
                 await self._rate_limiter.acquire()
-                page_result = await self._fetch_single_feed_page(
-                    user_id, username, page_size, cursor
-                )
+                try:
+                    page_result = await self._fetch_single_feed_page(
+                        user_id, username, page_size, cursor
+                    )
+                except FetchError:
+                    # Propagate FetchError (RateLimit, Auth, etc.) so the tool can report it
+                    raise
+                except Exception as exc:
+                    logger.warning("Feed page fetch failed for @%s: %s", username, exc)
+                    break
+
                 if not page_result.get("ok"):
                     logger.debug(
                         "Feed page failed for @%s page=%d status=%d — stopping",
@@ -2154,6 +2189,7 @@ class InstagramClient:
             "x-csrftoken": csrf,
             "x-ig-app-id": "936619743392459",
             "x-requested-with": "XMLHttpRequest",
+            "Cookie": self._cookie_str(),
         }
         # Try i.instagram.com first (mobile API is more permissive), then www
         hosts = ["https://i.instagram.com", "https://www.instagram.com"]
@@ -3632,35 +3668,46 @@ class InstagramClient:
         return await self._cache.get_or_fetch(cache_key, _do_fetch, ttl=cache_ttl)
 
     async def _fetch_fb_tokens(self) -> Tuple[str, str]:
-        """Fetch fb_dtsg and lsd tokens from Instagram homepage via requests (sync executor).
+        """Fetch fb_dtsg and lsd tokens from Instagram homepage.
 
-        Uses the standard requests library so that curl_cffi's cookie handling quirks
-        (e.g. rur cookie escaping) do not cause redirect loops. Instagram does NOT issue
-        a new csrftoken for this page-load, so there is no cookie mismatch risk.
+        If authenticated, uses the current session to get account-linked tokens
+        via CookieManager. Otherwise falls back to an anonymous (no-cookie)
+        fetch with HTTP/1.1 to force the legacy page format which embeds tokens.
         """
         import re as _re
 
-        cm = self._cookie_manager
-        cookie_dict = cm.cookies if cm else {}
-        cookie_str = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
+        # 1. Prefer authenticated tokens if we have a session
+        if self._cookie_manager and self._cookie_manager.is_authenticated:
+            try:
+                session = await self._get_auth_session()
+                return await self._cookie_manager.ensure_csrf_tokens(session)
+            except Exception as exc:
+                logger.warning(
+                    "Authenticated CSRF fetch failed (session may be stale), "
+                    "falling back to anonymous: %s",
+                    exc,
+                )
 
-        def _sync_fetch() -> str:
-            import requests as _req
-            r = _req.get(
+        # 2. Anonymous fallback (for public tools or if auth fetch failed)
+        from curl_cffi.requests import AsyncSession as _AsyncSession
+        from curl_cffi import CurlHttpVersion as _CurlHttpVersion
+
+        # HTTP/1.1 + no impersonation forces legacy page format
+        tmp = _AsyncSession(http_version=_CurlHttpVersion.V1_1)
+        try:
+            resp = await tmp.get(
                 "https://www.instagram.com/",
                 headers={
                     "User-Agent": self._config.ig_user_agent,
                     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                     "Accept-Language": "en-US,en;q=0.9",
-                    "Cookie": cookie_str,
                 },
                 timeout=20,
                 allow_redirects=True,
             )
-            return r.text
-
-        loop = asyncio.get_event_loop()
-        html = await loop.run_in_executor(None, _sync_fetch)
+            html = resp.text
+        finally:
+            await tmp.close()
 
         m = _re.search(r'"dtsg":\{"token":"([^"]+)"', html)
         if not m:
@@ -3706,9 +3753,10 @@ class InstagramClient:
                 pass
 
         # Step 2: Get user_id, then get_or_create via www
+        _ck = self._cookie_str()
         resp = await session.get(
             f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}",
-            headers={"x-ig-app-id": self._config.ig_app_id, "x-csrftoken": csrf},
+            headers={"x-ig-app-id": self._config.ig_app_id, "x-csrftoken": csrf, "Cookie": _ck},
         )
         if resp.status_code != 200:
             raise FetchError(f"Could not fetch profile for '{username}': HTTP {resp.status_code}")
@@ -3725,20 +3773,26 @@ class InstagramClient:
         for gc_host in ["https://www.instagram.com", "https://i.instagram.com"]:
             resp2 = await session.post(
                 f"{gc_host}/api/v1/direct_v2/threads/get_or_create/",
-                data={"recipient_users": f"[[{user_id}]]"},
+                data={
+                    "recipient_users": f"[[{user_id}]]",
+                    "use_unified_inbox": "true",
+                },
                 headers={
                     "x-csrftoken": csrf,
                     "x-ig-app-id": self._config.ig_app_id,
                     "Content-Type": "application/x-www-form-urlencoded",
+                    "Cookie": _ck,
+                    "referer": "https://www.instagram.com/direct/inbox/",
                 },
                 allow_redirects=False,
             )
-            if resp2.status_code == 200:
+            if resp2.status_code in (200, 201):
                 try:
                     body_check = resp2.text
                     if not body_check.lstrip().startswith("<"):
                         tdata = resp2.json()
-                        break
+                        if tdata.get("thread") or tdata.get("thread_id"):
+                            break
                 except Exception:
                     pass
         if tdata is None:
@@ -3790,13 +3844,13 @@ class InstagramClient:
         data = {
             "av": ds_user_id,
             "__d": "www",
-            "__user": "0",
+            "__user": ds_user_id,
             "__a": "1",
             "__req": str(random.randint(10, 99)),
             "dpr": "1",
             "__ccg": "GOOD",
             "fb_dtsg": fb_dtsg,
-            "jazoest": str(sum(ord(c) for c in fb_dtsg) + 26000),
+            "jazoest": "2" + str(sum(ord(c) for c in fb_dtsg)),
             "lsd": lsd,
             "fb_api_caller_class": "RelayModern",
             "fb_api_req_friendly_name": "IGDirectTextSendMutation",
@@ -3813,10 +3867,16 @@ class InstagramClient:
                 "x-csrftoken": csrf,
                 "x-fb-friendly-name": "IGDirectTextSendMutation",
                 "x-fb-lsd": lsd,
-                "x-ig-app-id": "936619743392459",
+                "x-ig-app-id": self._config.ig_app_id,
+                "x-ig-www-claim": "0",
+                "x-asbd-id": "129477",
+                "x-instagram-ajax": "1",
                 "Content-Type": "application/x-www-form-urlencoded",
-                "Referer": "https://www.instagram.com/direct/inbox/",
+                "Referer": f"https://www.instagram.com/direct/t/{thread_id}/",
                 "Origin": "https://www.instagram.com",
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-origin",
             },
             allow_redirects=False,
         )
@@ -3878,7 +3938,7 @@ class InstagramClient:
         ds_user_id = (cm.cookies.get("ds_user_id", "0") if cm else "0") or "0"
         session = await self._get_auth_session()
         data = {
-            "av": ds_user_id, "__d": "www", "__user": "0", "__a": "1",
+            "av": ds_user_id, "__d": "www", "__user": ds_user_id, "__a": "1",
             "fb_dtsg": fb_dtsg, "lsd": lsd,
             "fb_api_caller_class": "RelayModern",
             "fb_api_req_friendly_name": friendly_name,
@@ -3896,6 +3956,7 @@ class InstagramClient:
                 "content-type": "application/x-www-form-urlencoded",
                 "referer": "https://www.instagram.com/direct/inbox/",
                 "origin": "https://www.instagram.com",
+                "Cookie": self._cookie_str(),
             },
             allow_redirects=False,
         )
@@ -3985,6 +4046,14 @@ class InstagramClient:
             raise FetchError("post_comment requires authentication.")
         session = await self._get_auth_session()
         csrf = (cm.cookies.get("csrftoken", "")) or ""
+        _base_hdrs = {
+            "x-csrftoken": csrf, "x-ig-app-id": "936619743392459",
+            "content-type": "application/x-www-form-urlencoded",
+            "accept": "application/json, */*",
+            "referer": "https://www.instagram.com/",
+            "origin": "https://www.instagram.com",
+            "Cookie": self._cookie_str(),
+        }
         # Try www endpoint first
         resp = await session.post(
             f"https://www.instagram.com/api/v1/media/{media_id}/comment/",
@@ -3992,16 +4061,11 @@ class InstagramClient:
                 "comment_text": text,
                 "idempotence_token": str(int(time.time() * 1000)),
             },
-            headers={
-                "x-csrftoken": csrf, "x-ig-app-id": "936619743392459",
-                "content-type": "application/x-www-form-urlencoded",
-                "accept": "application/json, */*",
-                "referer": "https://www.instagram.com/",
-                "origin": "https://www.instagram.com",
-            },
+            headers=_base_hdrs,
+            allow_redirects=False,
         )
         body_text = resp.text
-        if resp.status_code not in (200, 201) or body_text.startswith("<!"):
+        if resp.status_code in (301, 302, 303, 307, 308) or resp.status_code not in (200, 201) or body_text.startswith("<!"):
             # Fall back to i.instagram.com
             resp = await session.post(
                 f"https://i.instagram.com/api/v1/media/{media_id}/comment/",
@@ -4009,13 +4073,8 @@ class InstagramClient:
                     "comment_text": text,
                     "idempotence_token": str(int(time.time() * 1000)),
                 },
-                headers={
-                    "x-csrftoken": csrf, "x-ig-app-id": "936619743392459",
-                    "content-type": "application/x-www-form-urlencoded",
-                    "accept": "application/json, */*",
-                    "referer": "https://www.instagram.com/",
-                    "origin": "https://www.instagram.com",
-                },
+                headers=_base_hdrs,
+                allow_redirects=False,
             )
             body_text = resp.text
         if resp.status_code not in (200, 201):
@@ -4045,17 +4104,19 @@ class InstagramClient:
         session = await self._get_auth_session()
         csrf = (cm.cookies.get("csrftoken", "")) or ""
 
+        _ck = self._cookie_str()
+        _sh = {"x-csrftoken": csrf, "x-ig-app-id": "936619743392459", "Cookie": _ck}
         # Try i.instagram.com (mobile API) first, fall back to web topsearch
         resp = await session.get(
             "https://i.instagram.com/api/v1/users/search/",
             params={"query": query, "count": str(count)},
-            headers={"x-csrftoken": csrf, "x-ig-app-id": "936619743392459"},
+            headers=_sh,
         )
         if resp.status_code != 200 or resp.text.lstrip().startswith("<"):
             resp = await session.get(
                 "https://www.instagram.com/web/search/topsearch/",
                 params={"query": query, "context": "blended", "count": str(count)},
-                headers={"x-csrftoken": csrf, "x-ig-app-id": "936619743392459"},
+                headers=_sh,
             )
         if resp.status_code != 200:
             raise FetchError(f"search_users: HTTP {resp.status_code}")
@@ -4168,6 +4229,7 @@ class InstagramClient:
                 "content-type": "application/x-www-form-urlencoded",
                 "referer": "https://www.instagram.com/",
                 "origin": "https://www.instagram.com",
+                "Cookie": self._cookie_str(),
             },
         )
         body = resp.text
@@ -4200,7 +4262,7 @@ class InstagramClient:
         my_id = (cm.cookies.get("ds_user_id", "")) or ""
         info_resp = await session.get(
             f"https://www.instagram.com/api/v1/users/{my_id}/info/",
-            headers={"x-csrftoken": csrf, "x-ig-app-id": "936619743392459"},
+            headers={"x-csrftoken": csrf, "x-ig-app-id": "936619743392459", "Cookie": self._cookie_str()},
         )
         current: Dict[str, Any] = {}
         if info_resp.status_code == 200:
@@ -4219,17 +4281,22 @@ class InstagramClient:
             "first_name": (full_name or current.get("full_name") or "").split()[0] if (full_name or current.get("full_name")) else "",
         }
 
-        resp = await session.post(
+        _ep_headers = {
+            "x-csrftoken": csrf, "x-ig-app-id": "936619743392459",
+            "content-type": "application/x-www-form-urlencoded",
+            "referer": "https://www.instagram.com/accounts/edit/",
+            "origin": "https://www.instagram.com",
+            "Cookie": self._cookie_str(),
+        }
+        # Try web-specific endpoint first, then mobile fallback
+        for _ep_url in [
+            "https://www.instagram.com/api/v1/web/accounts/edit/",
+            "https://i.instagram.com/api/v1/accounts/edit/",
             "https://www.instagram.com/api/v1/accounts/edit/",
-            data=data,
-            headers={
-                "x-csrftoken": csrf, "x-ig-app-id": "936619743392459",
-                "content-type": "application/x-www-form-urlencoded",
-                "referer": "https://www.instagram.com/accounts/edit/",
-                "origin": "https://www.instagram.com",
-            },
-            allow_redirects=False,
-        )
+        ]:
+            resp = await session.post(_ep_url, data=data, headers=_ep_headers, allow_redirects=False)
+            if resp.status_code in (200, 201) and not resp.text.lstrip().startswith("<"):
+                break
         if resp.status_code in (301, 302, 303, 307, 308):
             raise FetchError(f"edit_profile: redirected to login (session rate-limited)")
         if resp.status_code not in (200, 201):
@@ -4265,6 +4332,7 @@ class InstagramClient:
                 "content-type": "application/x-www-form-urlencoded",
                 "referer": "https://www.instagram.com/",
                 "origin": "https://www.instagram.com",
+                "Cookie": self._cookie_str(),
             },
             allow_redirects=False,
         )
@@ -4292,6 +4360,7 @@ class InstagramClient:
                 "content-type": "application/x-www-form-urlencoded",
                 "referer": "https://www.instagram.com/",
                 "origin": "https://www.instagram.com",
+                "Cookie": self._cookie_str(),
             },
             allow_redirects=False,
         )
@@ -4319,6 +4388,7 @@ class InstagramClient:
                 "content-type": "application/x-www-form-urlencoded",
                 "referer": "https://www.instagram.com/",
                 "origin": "https://www.instagram.com",
+                "Cookie": self._cookie_str(),
             },
             allow_redirects=False,
         )
@@ -4355,6 +4425,7 @@ class InstagramClient:
                 "content-type": "application/x-www-form-urlencoded",
                 "referer": "https://www.instagram.com/",
                 "origin": "https://www.instagram.com",
+                "Cookie": self._cookie_str(),
             },
             allow_redirects=False,
         )

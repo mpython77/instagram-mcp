@@ -138,12 +138,62 @@ def create_mcp_server():
 
         cleanup_task = asyncio.ensure_future(_cache_cleanup_loop())
         proxy_manager.start_health_checks()
+
+        # ── Scheduler ─────────────────────────────────────────────────────────
+        from .scheduler import PostScheduler
+        _scheduler = PostScheduler(export_dir=config.export_dir)
+        _scheduler.start()
+        server._post_scheduler = _scheduler  # type: ignore[attr-defined]
+
+        # ── Account Monitor ───────────────────────────────────────────────────
+        from .monitor import AccountMonitor
+        from .parser import parse_feed_items
+
+        async def _monitor_fetch(username: str, max_posts: int):
+            user = await client.fetch_user(username)
+            if user is None:
+                return []
+            profile_data = user.get("data", {}).get("user", {}) or user
+            user_id = str(profile_data.get("pk") or profile_data.get("id") or "")
+            if not user_id:
+                return []
+            items = await client.fetch_feed_items(user_id, max_posts)
+            posts = []
+            for item in items:
+                shortcode = item.get("code") or item.get("shortcode") or ""
+                posts.append({
+                    "shortcode": shortcode,
+                    "taken_at": item.get("taken_at", 0),
+                    "likes_count": item.get("like_count", 0),
+                    "caption": (item.get("caption") or {}).get("text", "") if isinstance(item.get("caption"), dict) else "",
+                })
+            return posts
+
+        _monitor = AccountMonitor(fetch_fn=_monitor_fetch)
+        _monitor.start()
+        server._account_monitor = _monitor  # type: ignore[attr-defined]
+
+        # ── Session Manager ───────────────────────────────────────────────────
+        from .session_manager import SessionManager
+        _session_mgr = SessionManager.from_env(config)
+        server._session_manager = _session_mgr  # type: ignore[attr-defined]
+
+        # ── OAuth Manager ─────────────────────────────────────────────────────
+        from .oauth_manager import OAuthManager
+        _oauth = OAuthManager.from_env(config.export_dir)
+        server._oauth_manager = _oauth  # type: ignore[attr-defined]
+        if _oauth:
+            logger.info("instagram_mcp: OAuth manager initialized (app_id=%s…)", _oauth._app_id[:8])
+            if _oauth.needs_refresh:
+                logger.warning("instagram_mcp: OAuth token expires soon — call instagram_oauth action='refresh_token'")
+
         logger.info(
-            "instagram_mcp v%s started | cache=%s | proxies=%d | transport=%s",
+            "instagram_mcp v%s started | cache=%s | proxies=%d | transport=%s | sessions=%d",
             __version__,
             "enabled" if config.cache_enabled else "disabled",
             len(config.proxy_urls),
             "http" if _is_http_transport() else "stdio",
+            len(_session_mgr.list_aliases()),
         )
         try:
             yield
@@ -151,6 +201,8 @@ def create_mcp_server():
             cleanup_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
                 await asyncio.wait_for(asyncio.shield(cleanup_task), timeout=3.0)
+            await _scheduler.stop()
+            await _monitor.stop()
             await proxy_manager.stop_health_checks()
             await client.close()
             logger.info("instagram_mcp v%s shutdown complete", __version__)
@@ -685,6 +737,7 @@ def run_server() -> None:
     _logging.basicConfig(
         level=_logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
+        stream=sys.stderr,
     )
 
     # uvloop — drop-in replacement giving +30-70% async throughput on Linux/macOS.

@@ -112,7 +112,7 @@ class _Encoder(json.JSONEncoder):
         if isinstance(obj, set):
             return sorted(str(x) for x in obj)
         if isinstance(obj, Path):
-            return str(obj)
+            return obj.as_posix()
         if isinstance(obj, bytes):
             return obj.decode("utf-8", errors="replace")
         return super().default(obj)

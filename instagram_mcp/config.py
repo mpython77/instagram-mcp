@@ -178,6 +178,8 @@ class MCPConfig:
             cfg.ig_app_id = v
         if v := os.environ.get("INSTAGRAM_MCP_IMPERSONATE"):
             cfg.ig_impersonate = v
+        if v := os.environ.get("INSTAGRAM_MCP_USER_AGENT"):
+            cfg.ig_user_agent = v
 
         # Network
         if v := os.environ.get("INSTAGRAM_MCP_TIMEOUT"):

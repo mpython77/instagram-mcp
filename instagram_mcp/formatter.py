@@ -2518,3 +2518,383 @@ def format_upload_result_markdown(result: Dict[str, Any], image_paths: List[str]
         ]
 
     return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DM Formatters
+# ─────────────────────────────────────────────────────────────────────────────
+
+def format_dm_inbox_markdown(data: dict) -> str:
+    """Format DM inbox thread list."""
+    threads = data.get("threads") or []
+    count = data.get("count", 0)
+    has_older = data.get("has_older", False)
+
+    lines = [f"## DM Inbox — {count} thread(s)"]
+    if not threads:
+        lines.append("\n_No threads found._")
+        return "\n".join(lines)
+
+    for t in threads:
+        title = t.get("thread_title") or ", ".join(
+            u.get("username", "?") for u in (t.get("users") or [])
+        )
+        unread = " 🔵" if t.get("has_unread") else ""
+        group = " [group]" if t.get("is_group") else ""
+        tid = t.get("thread_id", "")
+        last_type = t.get("last_message_type", "")
+        last_text = t.get("last_message_text", "")
+
+        lines.append(f"\n### {title}{unread}{group}")
+        lines.append(f"- **Thread ID:** `{tid}`")
+        if last_type:
+            if last_type == "text" and last_text:
+                snippet = last_text[:80] + ("…" if len(last_text) > 80 else "")
+                lines.append(f"- **Last message:** {snippet}")
+            else:
+                lines.append(f"- **Last message:** [{last_type}]")
+
+    if has_older:
+        cursor = data.get("oldest_cursor", "")
+        lines.append(f"\n_More threads available. Use cursor=`{cursor}` for next page._")
+
+    return "\n".join(lines)
+
+
+def format_dm_thread_markdown(data: dict) -> str:
+    """Format DM thread messages with media content, read status, and pagination."""
+    from datetime import datetime, timezone as _tz
+
+    title = data.get("thread_title", "")
+    is_group = data.get("is_group", False)
+    participants = data.get("participants") or []
+    messages = data.get("messages") or []
+    count = data.get("message_count", len(messages))
+    has_older = data.get("has_older", False)
+
+    participant_str = ", ".join(f"@{p.get('username','?')}" for p in participants)
+    group_str = " (group)" if is_group else ""
+
+    lines = [
+        f"## DM Thread: {title or participant_str}{group_str}",
+        f"**Participants:** {participant_str}",
+        f"**Messages shown:** {count}",
+        "",
+    ]
+
+    def _ts(ts: int) -> str:
+        if not ts:
+            return "?"
+        try:
+            t = ts / 1000000 if ts > 1e13 else ts / 1000 if ts > 1e12 else ts
+            return datetime.fromtimestamp(t, tz=_tz.utc).strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            return "?"
+
+    for msg in reversed(messages):  # oldest → newest
+        username = msg.get("username") or msg.get("user_id", "?")
+        ts_str = _ts(msg.get("timestamp", 0))
+        is_mine = msg.get("is_mine", False)
+        is_read = msg.get("is_read", False)
+        read_by = msg.get("read_by") or []
+        itype = msg.get("item_type", "text")
+
+        # Sender label
+        sender = "**me**" if is_mine else f"**@{username}**"
+
+        # Read receipt suffix (only for my messages)
+        if is_mine:
+            if read_by:
+                read_tag = f" ✓✓ seen by {', '.join('@' + r for r in read_by)}"
+            else:
+                read_tag = " ✓ sent"
+        else:
+            read_tag = ""
+
+        # Content
+        text = msg.get("text", "")
+        media_url = msg.get("media_url", "")
+        thumb_url = msg.get("thumb_url", "")
+        video_url = msg.get("video_url", "")
+        audio_url = msg.get("audio_url", "")
+        caption = msg.get("caption", "")
+
+        if itype == "text":
+            line = f"{sender} [{ts_str}]{read_tag}: {text}"
+        elif itype == "like":
+            line = f"{sender} [{ts_str}]{read_tag}: ❤️"
+        elif itype == "media_share":
+            media_label = msg.get("media_type", "media")
+            parts = [f"{sender} [{ts_str}]{read_tag}: [shared {media_label}]"]
+            if media_url:
+                parts.append(f"  → Post: {media_url}")
+            if caption:
+                parts.append(f"  → Caption: {caption[:100]}{'…' if len(caption) > 100 else ''}")
+            if video_url:
+                parts.append(f"  → Video: {video_url[:120]}")
+            elif thumb_url:
+                parts.append(f"  → Thumbnail: {thumb_url[:120]}")
+            line = "\n".join(parts)
+        elif itype == "raven_media":
+            media_label = msg.get("media_type", "disappearing_media")
+            parts = [f"{sender} [{ts_str}]{read_tag}: [{media_label}]"]
+            if video_url:
+                parts.append(f"  → Video: {video_url[:120]}")
+            elif thumb_url:
+                parts.append(f"  → Thumbnail: {thumb_url[:120]}")
+            line = "\n".join(parts)
+        elif itype == "voice_media":
+            parts = [f"{sender} [{ts_str}]{read_tag}: {text}"]
+            if audio_url:
+                parts.append(f"  → Audio: {audio_url[:120]}")
+            line = "\n".join(parts)
+        elif itype == "animated_media":
+            parts = [f"{sender} [{ts_str}]{read_tag}: [GIF]"]
+            if thumb_url:
+                parts.append(f"  → GIF: {thumb_url[:120]}")
+            line = "\n".join(parts)
+        else:
+            line = f"{sender} [{ts_str}]{read_tag}: {text or f'[{itype}]'}"
+
+        lines.append(line)
+
+    if has_older:
+        cursor = data.get("prev_cursor") or data.get("oldest_cursor", "")
+        lines.append(f"\n_Older messages available. Pass cursor=`{cursor}` to load more._")
+
+    return "\n".join(lines)
+
+
+def format_dm_send_markdown(data: dict) -> str:
+    """Format DM send result."""
+    status = data.get("status", "")
+    thread_id = data.get("thread_id", "")
+    item_id = data.get("item_id", "")
+    ts = data.get("timestamp", 0)
+    ts_str = ""
+    if ts:
+        try:
+            from datetime import datetime, timezone
+            ts_str = datetime.fromtimestamp(ts / 1000 if ts > 1e12 else ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        except Exception:
+            pass
+
+    lines = ["## Message Sent", f"- **Status:** {status}"]
+    if data.get("username"):
+        lines.append(f"- **To:** @{data['username']}")
+    lines.append(f"- **Thread:** `{thread_id}`")
+    lines.append(f"- **Message ID:** `{item_id}`")
+    if ts_str:
+        lines.append(f"- **Sent at:** {ts_str}")
+    return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Schedule Formatter
+# ─────────────────────────────────────────────────────────────────────────────
+
+def format_schedule_markdown(action: str, data: dict) -> str:
+    """Format instagram_schedule tool results."""
+    if action == "add":
+        entry = data
+        lines = [
+            "## Post Scheduled",
+            f"- **ID:** `{entry.get('id', '?')}`",
+            f"- **Publish at:** {entry.get('publish_at_str', '?')}",
+            f"- **Images:** {len(entry.get('images', []))} file(s)",
+        ]
+        caption = entry.get("caption", "")
+        if caption:
+            snippet = caption[:100] + ("…" if len(caption) > 100 else "")
+            lines.append(f"- **Caption:** {snippet}")
+        lines.append(f"\n_Use action='cancel' with post_id='{entry.get('id')}' to cancel._")
+        return "\n".join(lines)
+
+    elif action == "list":
+        pending = data.get("pending", [])
+        if not pending:
+            return "## Scheduled Posts\n\n_No pending scheduled posts._"
+        lines = [f"## Scheduled Posts — {len(pending)} pending"]
+        for e in pending:
+            lines.append(
+                f"\n- **[{e.get('id')}]** {e.get('publish_at_str', '?')} "
+                f"— {len(e.get('images', []))} image(s)"
+            )
+            cap = e.get("caption", "")
+            if cap:
+                lines.append(f"  _{cap[:80]}{'…' if len(cap) > 80 else ''}_")
+        return "\n".join(lines)
+
+    elif action == "cancel":
+        removed = data.get("removed", False)
+        post_id = data.get("post_id", "?")
+        if removed:
+            return f"## Cancelled\n\nScheduled post `{post_id}` has been removed."
+        return f"## Not Found\n\nNo scheduled post with ID `{post_id}` found."
+
+    elif action == "status":
+        stats = data
+        running = "running" if stats.get("running") else "stopped"
+        lines = [
+            "## Scheduler Status",
+            f"- **State:** {running}",
+            f"- **Pending posts:** {stats.get('pending_count', 0)}",
+            f"- **Published:** {stats.get('published_count', 0)}",
+            f"- **Check interval:** {stats.get('check_interval_seconds', '?')}s",
+            f"- **Last check:** {stats.get('last_check_at', 'never')}",
+            f"- **Schedule file:** `{stats.get('schedule_file', '?')}`",
+        ]
+        return "\n".join(lines)
+
+    return f"## Schedule\n\n{data}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Monitor Formatter
+# ─────────────────────────────────────────────────────────────────────────────
+
+def format_monitor_markdown(action: str, data: dict) -> str:
+    """Format instagram_monitor tool results."""
+    if action == "add":
+        lines = [
+            "## Monitor Added",
+            f"- **Account:** @{data.get('username', '?')}",
+            f"- **Webhook:** {data.get('webhook_url', '?')}",
+            f"- **Interval:** {data.get('interval_seconds', '?')}s",
+            f"- **Status:** monitoring active",
+        ]
+        last = data.get("last_post_shortcode", "")
+        if last:
+            lines.append(f"- **Seeded at:** `{last}` (existing posts won't trigger webhook)")
+        return "\n".join(lines)
+
+    elif action == "remove":
+        removed = data.get("removed", False)
+        username = data.get("username", "?")
+        if removed:
+            return f"## Monitor Removed\n\n@{username} is no longer being monitored."
+        return f"## Not Found\n\n@{username} was not being monitored."
+
+    elif action == "list":
+        entries = data.get("monitors", [])
+        if not entries:
+            return "## Active Monitors\n\n_No accounts are currently being monitored._"
+        lines = [f"## Active Monitors — {len(entries)} account(s)"]
+        for e in entries:
+            lines.append(f"\n### @{e.get('username', '?')}")
+            lines.append(f"- Webhook: `{e.get('webhook_url', '?')}`")
+            lines.append(f"- Interval: {e.get('interval_seconds', '?')}s")
+            lines.append(f"- Last check: {e.get('last_check', 'never')}")
+            lines.append(f"- Notifications sent: {e.get('notifications_sent', 0)}")
+        return "\n".join(lines)
+
+    elif action == "status":
+        stats = data
+        running = "running" if stats.get("running") else "stopped"
+        lines = [
+            "## Monitor Status",
+            f"- **State:** {running}",
+            f"- **Accounts monitored:** {stats.get('monitored_accounts', 0)}",
+            f"- **Total checks:** {stats.get('total_checks', 0)}",
+            f"- **Total notifications:** {stats.get('total_notifications', 0)}",
+            f"- **Started at:** {stats.get('started_at', 'not started')}",
+        ]
+        return "\n".join(lines)
+
+    elif action == "test":
+        success = data.get("success", False)
+        url = data.get("webhook_url", "?")
+        if success:
+            return f"## Test Webhook Sent\n\nTest payload successfully delivered to:\n`{url}`"
+        return f"## Test Webhook Failed\n\nCould not deliver test payload to:\n`{url}`\n\nCheck that the URL is reachable and accepts POST requests."
+
+    return f"## Monitor\n\n{data}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OAuth Formatter
+# ─────────────────────────────────────────────────────────────────────────────
+
+def format_oauth_markdown(action: str, data: dict) -> str:
+    """Format instagram_oauth tool results."""
+    if action == "init_flow":
+        url = data.get("auth_url", "")
+        lines = [
+            "## OAuth Authorization",
+            "",
+            "**Step 1:** Visit this URL and authorize access:",
+            "",
+            f"```\n{url}\n```",
+            "",
+            "**Step 2:** After authorizing, copy the `code` parameter from the redirect URL.",
+            "",
+            "**Step 3:** Call `instagram_oauth` with action='exchange_code' and the code value.",
+        ]
+        return "\n".join(lines)
+
+    elif action in ("exchange_code", "refresh_token"):
+        label = "Token Obtained" if action == "exchange_code" else "Token Refreshed"
+        lines = [
+            f"## {label}",
+            f"- **Valid:** {'yes' if data.get('token_valid') else 'no'}",
+            f"- **Expires at:** {data.get('expires_at', '?')}",
+            f"- **Days remaining:** {data.get('days_remaining', 0)}",
+        ]
+        if data.get("needs_refresh"):
+            lines.append("\n_Token will expire soon — run refresh_token soon._")
+        return "\n".join(lines)
+
+    elif action == "status":
+        configured = data.get("configured", False)
+        if not configured:
+            return (
+                "## OAuth Status\n\n"
+                "**Not configured.** Set environment variables:\n"
+                "- `INSTAGRAM_MCP_OAUTH_APP_ID`\n"
+                "- `INSTAGRAM_MCP_OAUTH_APP_SECRET`\n"
+                "- `INSTAGRAM_MCP_OAUTH_REDIRECT_URI`"
+            )
+        has_token = data.get("has_token", False)
+        valid = data.get("token_valid", False)
+        lines = [
+            "## OAuth Status",
+            f"- **App ID:** `{data.get('app_id', '?')}`",
+            f"- **Has token:** {'yes' if has_token else 'no — run init_flow + exchange_code'}",
+        ]
+        if has_token:
+            lines += [
+                f"- **Token valid:** {'yes' if valid else 'no (expired)'}",
+                f"- **Expires at:** {data.get('expires_at', '?')}",
+                f"- **Days remaining:** {data.get('days_remaining', 0)}",
+            ]
+            if data.get("needs_refresh"):
+                lines.append("\n⚠️ **Token expires soon — run action='refresh_token'**")
+        return "\n".join(lines)
+
+    return f"## OAuth\n\n{data}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sessions Formatter
+# ─────────────────────────────────────────────────────────────────────────────
+
+def format_sessions_markdown(data: dict) -> str:
+    """Format instagram_sessions tool results."""
+    sessions = data.get("sessions", {})
+    if not sessions:
+        return "## Sessions\n\n_No sessions loaded._"
+
+    lines = [f"## Sessions — {len(sessions)} loaded"]
+    for alias, info in sessions.items():
+        auth = "authenticated" if info.get("authenticated") else "not authenticated"
+        path = info.get("cookies_path", "")
+        lines.append(f"\n- **{alias}**: {auth}")
+        if path:
+            lines.append(f"  Path: `{path}`")
+
+    authed = data.get("authenticated_count", 0)
+    lines.append(f"\n**{authed}/{len(sessions)}** sessions authenticated.")
+    lines.append(
+        "\n_To add a session: set env var `INSTAGRAM_MCP_COOKIES_<ALIAS>=/path/to/cookies.txt` and restart._"
+    )
+    return "\n".join(lines)

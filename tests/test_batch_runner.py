@@ -17,7 +17,7 @@ def test_parse_date():
     
     with patch("instagram_mcp.batch_runner.datetime") as mock_dt:
         mock_instance = MagicMock()
-        mock_instance.timestamp.return_value = 123456789.0
+        mock_instance.replace.return_value.timestamp.return_value = 123456789.0
         mock_dt.strptime.return_value = mock_instance
         assert _parse_date("01.01.2023") == 123456789
         

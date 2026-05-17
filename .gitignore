@@ -14,16 +14,34 @@ build/
 venv/
 env/
 
-# Credentials & sessions
+# Credentials & Sessions (EXTREMELY IMPORTANT)
 cookies.txt
 cookies.json
+cookie.txt
 proxies.txt
+header.txt
+payload.txt
+response.txt
+.state/
+.env
 
-# Feature/debug files
-feature/
+# Data & Exports
+exports/
+data/
 *.json
+*.jsonl
+*.txt
+preview.txt
+o.json.jsonl
 
-# Logs
+# Temporary & Debug Scripts
+debug_*.py
+test_*.py
+run_test*.py
+check_html.py
+send_dm_api.py
+
+# Logs & Tests
 *.log
 .coverage
 .coverage.*
@@ -32,7 +50,6 @@ coverage.xml
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.env
 
 # IDE
 .idea/
@@ -43,3 +60,10 @@ coverage.xml
 # OS
 .DS_Store
 Thumbs.db
+
+# Exceptions: Allow essential config files even if they have blocked extensions
+!pyproject.toml
+!requirements.txt
+!LICENSE
+!README.md
+!.gitignore

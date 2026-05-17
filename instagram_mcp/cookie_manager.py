@@ -155,28 +155,30 @@ class CookieManager:
         *session* is a curl_cffi.requests.AsyncSession with cookies already set.
         """
         async with self._csrf_lock:
-            # Fast path: return cached tokens if they are still valid.
-            if self._csrf_cache:
+            now = time.monotonic()
+            age = now - self._csrf_fetched_at
+
+            # If cache is valid and not stale, return it
+            if self._csrf_cache and age < _CSRF_CACHE_TTL:
                 return self._csrf_cache
 
-            age = time.monotonic() - self._csrf_fetched_at
-            if self._fb_dtsg and self._lsd and age < _CSRF_CACHE_TTL:
-                self._csrf_cache = (self._fb_dtsg, self._lsd)
-                return self._csrf_cache
-
+            # Refresh needed
             fb_dtsg, lsd = await _fetch_csrf_tokens(session, self._cookies)
             if fb_dtsg and lsd:
                 self._fb_dtsg = fb_dtsg
                 self._lsd = lsd
-                self._csrf_fetched_at = time.monotonic()
+                self._csrf_fetched_at = now
                 self._csrf_cache = (fb_dtsg, lsd)
                 logger.debug("CSRF tokens refreshed (fb_dtsg=%s…)", fb_dtsg[:12])
             else:
+                # If we have old tokens and refresh failed, we might want to retry
+                # or raise. Here we raise as per existing logic.
                 raise RuntimeError(
                     "Could not extract fb_dtsg/lsd from instagram.com — "
                     "session may be expired. Please re-export cookies.txt."
                 )
-        return self._csrf_cache  # type: ignore[return-value]
+
+            return self._csrf_cache
 
     # ── Path resolution ──────────────────────────────────────────────────────
 
@@ -243,7 +245,7 @@ def _parse_json_cookies(raw: str) -> Dict[str, str]:
                 continue
             result[name] = str(value)
         except Exception as e:
-            logger.warning("Skipping malformed cookie entry: %s", e)
+            logger.debug("Skipping malformed cookie entry: %s", e)
             continue
 
     return result
@@ -283,7 +285,6 @@ async def _fetch_csrf_tokens(session, cookies: Dict[str, str]) -> Tuple[Optional
     try:
         resp = await session.get(
             "https://www.instagram.com/",
-            cookies=cookies,
             headers={
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "

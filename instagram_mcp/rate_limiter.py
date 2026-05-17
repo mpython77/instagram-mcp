@@ -92,9 +92,26 @@ class AdaptiveRateLimiter:
         self._last_refill = now
 
     async def acquire(self) -> float:
-        """Acquire one token. Waits until a token is available."""
+        """Acquire one token. Waits until a token is available or circuit closes."""
         waited = 0.0
         while True:
+            # ── Circuit breaker check ───────────────────────────────────────
+            # If circuit is OPEN, wait for the global cooldown
+            if self._cb_state == _CBState.OPEN:
+                now = time.monotonic()
+                if now < self._cb_until:
+                    sleep_time = self._cb_until - now
+                    logger.debug("Rate limiter: circuit OPEN, waiting %.1fs", sleep_time)
+                    await asyncio.sleep(sleep_time)
+                    waited += sleep_time
+                    continue
+                else:
+                    # Cooldown expired -> move to HALF_OPEN (probe allowed)
+                    async with self._lock:
+                        if self._cb_state == _CBState.OPEN:
+                            self._cb_state = _CBState.HALF_OPEN
+                            logger.info("Rate limiter: circuit HALF_OPEN (probe allowed)")
+
             async with self._lock:
                 self._refill()
                 if self._tokens >= 1.0:

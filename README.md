@@ -1,8 +1,8 @@
 # instagram-mcp
 
-![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![MCP](https://img.shields.io/badge/MCP-compatible-green) ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![MCP](https://img.shields.io/badge/MCP-compatible-green) ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey) [![CI](https://github.com/mpython77/instagram-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mpython77/instagram-mcp/actions/workflows/ci.yml) [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/mpython77/instagram-mcp/pkgs/container/instagram-mcp)
 
-A production-grade MCP (Model Context Protocol) server for Instagram intelligence. Exposes **26 tools** across two auth tiers — 15 tools run fully anonymously with no credentials; 11 tools require a `cookies.txt` session file. Built on `curl_cffi` with Chrome TLS impersonation, adaptive rate limiting, smart caching, and automatic JSON export.
+A production-grade MCP (Model Context Protocol) server for Instagram intelligence. Exposes **35 tools** across two auth tiers — 15 tools run fully anonymously with no credentials; the rest require a `cookies.txt` session file. Built on `curl_cffi` with Chrome TLS impersonation, adaptive rate limiting, smart caching, automatic JSON export, post scheduling, DM tools, account monitoring, multi-account sessions, and OAuth support.
 
 Works natively with **Claude Desktop**, **Claude Code**, and any MCP-compatible AI client.
 
@@ -15,21 +15,29 @@ Works natively with **Claude Desktop**, **Claude Code**, and any MCP-compatible 
 | Tier | Symbol | Requirement | Tool count |
 |------|--------|-------------|-----------|
 | Anonymous | 🌐 | None — no login, no cookies | 15 tools |
-| Authenticated | 🔐 | `cookies.txt` with a valid Instagram session | 11 tools |
+| Authenticated | 🔐 | `cookies.txt` with a valid Instagram session | 17 tools |
+| Auto-mode | 🌐/🔐 | Works anonymously, upgrades when cookies present | 1 tool |
+| Server | — | Always available | 7 tools |
 
 `instagram_hashtag` auto-upgrades from anon to auth mode when cookies are present.
 
 ### Key Features
 
-- **Chrome TLS impersonation** via `curl_cffi` — bypasses fingerprint-based blocking
-- **Adaptive rate limiter** — token-bucket with auto-backoff on 429, circuit breaker after 5 consecutive failures
+- **Strict Chrome TLS impersonation** via `curl_cffi` — 100% of HTTP requests (API, Auth, Webhooks) use impersonation to bypass fingerprinting
+- **Adaptive rate limiter** — token-bucket with auto-backoff on 429, and a global circuit breaker to prevent account bans
 - **Smart cache** — per-endpoint TTLs, LRU eviction, instant repeat calls
-- **Proxy pool** — round-robin with per-proxy health tracking, auto-fallback to direct
+- **Proxy pool** — round-robin with per-proxy health tracking, masked credentials, auto-fallback to direct
 - **Progress reporting** — MCP-native `report_progress` on every paginated tool
 - **JSON auto-export** — every tool result saved to `exports/` with `_meta` + `_summary` + `data`
 - **Selective toolsets** — enable only the groups you need via `INSTAGRAM_MCP_TOOLSETS`
+- **Post scheduling** — schedule posts for future publishing; auto-published by background task
+- **DM tools** — read inbox, fetch threads, send messages with browser-grade headers
+- **Account monitoring** — poll accounts for new posts and securely fire webhook notifications
+- **Multi-account sessions** — run multiple Instagram sessions simultaneously
+- **Managed OAuth** — full Graph API OAuth 2.0 flow with tokens securely isolated in `.state/`
 - **Upload support** — publish single photos or carousels directly from Claude
 - **Download support** — save images, videos, reels, and carousel slides to disk
+- **Docker** — containerized deployment with `docker-compose` or GHCR image
 
 ---
 
@@ -38,8 +46,8 @@ Works natively with **Claude Desktop**, **Claude Code**, and any MCP-compatible 
 ### Using pip
 
 ```bash
-git clone <repo_url>
-cd instagram_mcp
+git clone https://github.com/mpython77/instagram-mcp.git
+cd instagram-mcp
 pip install -e .
 instagram-mcp
 ```
@@ -48,31 +56,30 @@ instagram-mcp
 
 ```bash
 uv sync
-uv run instagram-mcp
+uv run --quiet instagram-mcp
 ```
 
-### cookies.txt Setup (for authenticated tools)
+### Cookie Setup (for authenticated tools)
 
 1. Log in to Instagram in your browser.
 2. Install a cookie export extension:
-   - Chrome: "Get cookies.txt LOCALLY"
-   - Firefox: "cookies.txt" extension
-3. Navigate to `instagram.com`, click the extension, export as `cookies.txt` (Netscape format).
-4. Place the file in the project root or set `INSTAGRAM_MCP_COOKIES=/path/to/cookies.txt`.
+   - Chrome/Firefox: **"Cookie-Editor"** or **"EditThisCookie"**
+3. Navigate to `instagram.com`, click the extension, export as JSON.
+4. Save the file as `cookies.json` in the project root or set `INSTAGRAM_MCP_COOKIES=/path/to/cookies.json`.
 
-**Netscape format reference:**
-```
-# Netscape HTTP Cookie File
-.instagram.com	TRUE	/	TRUE	1800000000	sessionid	YOUR_SESSION_ID
-.instagram.com	TRUE	/	TRUE	1800000000	csrftoken	YOUR_CSRF_TOKEN
-.instagram.com	TRUE	/	TRUE	1800000000	ds_user_id	YOUR_USER_ID
-.instagram.com	TRUE	/	TRUE	1800000000	ig_did	YOUR_DEVICE_ID
-```
+*Note: You can also use `cookies.txt` (Netscape format), but `cookies.json` is recommended to avoid parsing issues with special characters.*
 
 **Session hygiene:**
 - Use a dedicated account — not your personal account.
-- Sessions expire; refresh `cookies.txt` if you get 401 errors.
+- Sessions expire; refresh `cookies.json` if you get 401 errors.
 - Do not share the same session between scraping and normal browsing.
+
+### Configuration (Environment Variables)
+
+- `INSTAGRAM_MCP_USER_AGENT`: Custom browser User-Agent string.
+- `INSTAGRAM_MCP_IMPERSONATE`: Browser fingerprint to impersonate (default: `chrome142`).
+- `INSTAGRAM_MCP_COOKIES`: Path to `cookies.json` or `cookies.txt`.
+- `INSTAGRAM_MCP_PROXIES`: Comma-separated list of proxies.
 
 ### MCP Config for Claude Desktop
 
@@ -118,7 +125,117 @@ claude mcp add instagram instagram-mcp --env INSTAGRAM_MCP_COOKIES=/path/to/cook
 
 ---
 
-## All 26 Tools
+## Docker
+
+### Quick start with Docker
+
+```bash
+# Pull and run (HTTP transport, port 8000)
+docker run -d \
+  -e INSTAGRAM_MCP_TRANSPORT=http \
+  -e INSTAGRAM_MCP_COOKIES=/data/cookies.txt \
+  -v /path/to/cookies.txt:/data/cookies.txt:ro \
+  -p 8000:8000 \
+  ghcr.io/mpython77/instagram-mcp:latest
+
+# Or with docker-compose (edit docker-compose.yml first)
+docker compose up -d
+```
+
+### Docker + Claude Desktop
+
+```json
+{
+  "mcpServers": {
+    "instagram": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i",
+        "-e", "INSTAGRAM_MCP_COOKIES=/data/cookies.txt",
+        "-v", "/path/to/cookies.txt:/data/cookies.txt:ro",
+        "ghcr.io/mpython77/instagram-mcp:latest"
+      ]
+    }
+  }
+}
+```
+
+---
+
+## New Features
+
+### Post Scheduling (`instagram_schedule`)
+
+Schedule posts for automatic future publishing:
+
+```
+instagram_schedule(action="add", images=["/path/image.jpg"], caption="Hello!", publish_at="2026-06-01T10:00:00")
+instagram_schedule(action="list")
+instagram_schedule(action="cancel", post_id="abc12345")
+instagram_schedule(action="status")
+```
+
+### DM Tools
+
+Read and send direct messages (requires `cookies.txt`):
+
+```
+instagram_dm_inbox(limit=20)
+instagram_dm_thread(thread_id="<thread_id>", limit=20)
+instagram_dm_send(thread_id="<thread_id>", text="Hello!")
+```
+
+### Account Monitoring (`instagram_monitor`)
+
+Monitor accounts for new posts and fire webhooks:
+
+```
+instagram_monitor(action="add", username="nike", webhook_url="https://yoursite.com/hook", interval=300)
+instagram_monitor(action="list")
+instagram_monitor(action="test", webhook_url="https://yoursite.com/hook")
+instagram_monitor(action="remove", username="nike")
+```
+
+Webhook payload:
+```json
+{"event": "new_post", "username": "nike", "shortcode": "DXj...", "post_url": "...", "likes": 12345}
+```
+
+### Multi-Account Sessions (`instagram_sessions`)
+
+Run multiple Instagram accounts simultaneously:
+
+```bash
+# Set env vars for each account
+export INSTAGRAM_MCP_COOKIES=cookies_default.txt
+export INSTAGRAM_MCP_COOKIES_BRAND=cookies_brand.txt
+export INSTAGRAM_MCP_COOKIES_AGENCY=cookies_agency.txt
+```
+
+```
+instagram_sessions(action="list")
+```
+
+### Managed OAuth (`instagram_oauth`)
+
+Full Instagram Graph API OAuth 2.0 flow:
+
+```bash
+# Configure env vars
+export INSTAGRAM_MCP_OAUTH_APP_ID="your_app_id"
+export INSTAGRAM_MCP_OAUTH_APP_SECRET="your_app_secret"
+export INSTAGRAM_MCP_OAUTH_REDIRECT_URI="https://yourapp.com/callback"
+```
+
+```
+instagram_oauth(action="init_flow")         # Get authorization URL
+instagram_oauth(action="exchange_code", code="<callback_code>")  # Get token
+instagram_oauth(action="refresh_token")     # Refresh before expiry
+instagram_oauth(action="status")            # Check token validity
+```
+
+---
+
+## All 35 Tools
 
 ### 🗂️ Profile & Feed
 

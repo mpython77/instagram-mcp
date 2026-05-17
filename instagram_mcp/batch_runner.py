@@ -297,8 +297,21 @@ class BatchRunner:
         try:
             await producer_task
             # Once producer is done, sentinels are in the queue → workers will
-            # drain and exit naturally.
-            await asyncio.gather(*worker_tasks, return_exceptions=True)
+            # drain and exit naturally. Wait for either all workers to finish
+            # OR the writer to fail early (prevents deadlock on output_q).
+            workers_all_done = asyncio.create_task(asyncio.gather(*worker_tasks, return_exceptions=True))
+            done, pending_tasks = await asyncio.wait(
+                [workers_all_done, writer_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+
+            # If writer finished first, it likely crashed
+            if writer_task in done and not workers_all_done.done():
+                exc = writer_task.exception()
+                logger.error("Batch writer failed prematurely: %s", exc or "Stopped unexpectedly")
+                if exc: raise exc
+                raise RuntimeError("Batch writer stopped unexpectedly")
+
             # All workers done → push writer sentinel so it stops.
             await output_q.put(_SENTINEL)
             await writer_task

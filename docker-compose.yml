@@ -1,0 +1,49 @@
+version: "3.9"
+
+services:
+  instagram-mcp:
+    image: ghcr.io/mpython77/instagram-mcp:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      # Auth — mount cookies.txt and point here
+      INSTAGRAM_MCP_COOKIES: /app/data/cookies.txt
+
+      # Transport — 'http' for remote access, 'stdio' for Claude Desktop
+      INSTAGRAM_MCP_TRANSPORT: ${INSTAGRAM_MCP_TRANSPORT:-stdio}
+
+      # Proxies (comma-separated or path to proxies.txt)
+      INSTAGRAM_MCP_PROXIES: ${INSTAGRAM_MCP_PROXIES:-}
+
+      # Export directory
+      INSTAGRAM_MCP_EXPORT_DIR: /app/exports
+
+      # Optional: additional named sessions
+      # INSTAGRAM_MCP_COOKIES_BRAND: /app/data/brand_cookies.txt
+
+      # Optional: OAuth for Graph API
+      # INSTAGRAM_MCP_OAUTH_APP_ID: ""
+      # INSTAGRAM_MCP_OAUTH_APP_SECRET: ""
+      # INSTAGRAM_MCP_OAUTH_REDIRECT_URI: "https://yourapp.com/callback"
+
+      # Cache and rate limits
+      INSTAGRAM_MCP_CACHE_TTL: ${INSTAGRAM_MCP_CACHE_TTL:-300}
+      INSTAGRAM_MCP_RATE_LIMIT_RPS: ${INSTAGRAM_MCP_RATE_LIMIT_RPS:-100}
+
+    volumes:
+      - ./data:/app/data:ro          # cookies.txt and other secrets (read-only)
+      - ./exports:/app/exports       # exported JSON files (read-write)
+
+    ports:
+      # Only exposed when INSTAGRAM_MCP_TRANSPORT=http
+      - "${INSTAGRAM_MCP_PORT:-8000}:8000"
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import instagram_mcp; print('ok')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

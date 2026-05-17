@@ -313,7 +313,7 @@ class TestClientUploadPhoto:
             "shortcode": "ABC", "url": "https://www.instagram.com/p/ABC/",
             "media_id": "111", "caption": "hi", "images_uploaded": 1,
         }
-        client._upload_single_image = AsyncMock(return_value="upload_id_1")
+        client._upload_single_image = AsyncMock(return_value=("upload_id_1", 1080, 1080))
         client._configure_single = AsyncMock(return_value=expected)
 
         result = await client.upload_photo(["/tmp/a.jpg"], caption="hi")
@@ -332,7 +332,9 @@ class TestClientUploadPhoto:
             "shortcode": "XYZ", "url": "https://www.instagram.com/p/XYZ/",
             "media_id": "222", "caption": "multi", "images_uploaded": 3,
         }
-        client._upload_single_image = AsyncMock(side_effect=["uid1", "uid2", "uid3"])
+        client._upload_single_image = AsyncMock(side_effect=[
+            ("uid1", 1080, 1080), ("uid2", 1080, 1080), ("uid3", 1080, 1080)
+        ])
         client._configure_carousel = AsyncMock(return_value=expected)
 
         result = await client.upload_photo(
@@ -341,7 +343,7 @@ class TestClientUploadPhoto:
         assert result == expected
         client._configure_carousel.assert_awaited_once()
         _, _, upload_ids, *_ = client._configure_carousel.call_args[0]
-        assert upload_ids == ["uid1", "uid2", "uid3"]
+        assert upload_ids == [("uid1", 1080, 1080), ("uid2", 1080, 1080), ("uid3", 1080, 1080)]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -401,12 +403,12 @@ class TestUploadSingleImage:
         resp_mock.json.return_value = {}  # no upload_id
         session_mock.post = AsyncMock(return_value=resp_mock)
 
+        mock_file = MagicMock()
+        mock_file.__enter__ = MagicMock(return_value=MagicMock(read=MagicMock(return_value=jpeg)))
+        mock_file.__exit__ = MagicMock(return_value=False)
         with patch("os.path.isfile", return_value=True), \
-             patch("aiofiles.open") as mock_af:
-            mock_af.return_value.__aenter__ = AsyncMock(
-                return_value=AsyncMock(read=AsyncMock(return_value=jpeg))
-            )
-            mock_af.return_value.__aexit__ = AsyncMock(return_value=False)
+             patch("builtins.open", return_value=mock_file), \
+             patch.object(client, "_prepare_image", return_value=(jpeg, 1080, 1080)):
             with pytest.raises(FetchError, match="missing upload_id"):
                 await client._upload_single_image(
                     session_mock, "csrf", "cookie_hdr", "/fake/a.jpg"
@@ -423,16 +425,16 @@ class TestUploadSingleImage:
         resp_mock.json.return_value = {"upload_id": "99887766"}
         session_mock.post = AsyncMock(return_value=resp_mock)
 
+        mock_file = MagicMock()
+        mock_file.__enter__ = MagicMock(return_value=MagicMock(read=MagicMock(return_value=jpeg)))
+        mock_file.__exit__ = MagicMock(return_value=False)
         with patch("os.path.isfile", return_value=True), \
-             patch("aiofiles.open") as mock_af:
-            mock_af.return_value.__aenter__ = AsyncMock(
-                return_value=AsyncMock(read=AsyncMock(return_value=jpeg))
-            )
-            mock_af.return_value.__aexit__ = AsyncMock(return_value=False)
+             patch("builtins.open", return_value=mock_file), \
+             patch.object(client, "_prepare_image", return_value=(jpeg, 1080, 1080)):
             result = await client._upload_single_image(
                 session_mock, "csrf", "cookie_hdr", "/fake/a.jpg"
             )
-        assert result == "99887766"
+        assert result == ("99887766", 1080, 1080)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

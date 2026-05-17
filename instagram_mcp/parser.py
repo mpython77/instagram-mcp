@@ -508,7 +508,7 @@ def parse_feed_tags_from_edges(
         ts_str = ""
         if taken_at:
             try:
-                ts_str = _dt.fromtimestamp(taken_at).strftime("%Y-%m-%d %H:%M")
+                ts_str = _dt.fromtimestamp(taken_at, tz=_tz.utc).strftime("%Y-%m-%d %H:%M UTC")
             except (OSError, OverflowError, ValueError):
                 ts_str = ""
 
@@ -639,7 +639,7 @@ def parse_feed_items(
         ts_str = ""
         if taken_at:
             try:
-                ts_str = _dt.fromtimestamp(taken_at).strftime("%Y-%m-%d %H:%M")
+                ts_str = _dt.fromtimestamp(taken_at, tz=_tz.utc).strftime("%Y-%m-%d %H:%M UTC")
             except (OSError, OverflowError, ValueError):
                 ts_str = ""
 

@@ -36,8 +36,9 @@ _VALID_SCHEMES = ("http://", "https://", "socks5://", "socks4://")
 def _validate_proxy_url(url: str) -> None:
     """Validate a proxy URL, raising ValueError with a clear message if invalid."""
     if not any(url.startswith(scheme) for scheme in _VALID_SCHEMES):
+        masked = _mask_proxy_url(url)
         raise ValueError(
-            f"Invalid proxy URL {url!r}: must start with one of "
+            f"Invalid proxy URL {masked!r}: must start with one of "
             f"{', '.join(_VALID_SCHEMES)}"
         )
     # Extract the host part after scheme/userinfo
@@ -46,8 +47,9 @@ def _validate_proxy_url(url: str) -> None:
         rest = rest.split("@", 1)[1]
     host = rest.split("/")[0].split(":")[0]
     if not host:
+        masked = _mask_proxy_url(url)
         raise ValueError(
-            f"Invalid proxy URL {url!r}: must contain a host after the scheme"
+            f"Invalid proxy URL {masked!r}: must contain a host after the scheme"
         )
     # Port validation
     if ":" in rest.split("/")[0]:
@@ -55,8 +57,9 @@ def _validate_proxy_url(url: str) -> None:
         if port_str.isdigit():
             port = int(port_str)
             if not (1 <= port <= 65535):
+                masked = _mask_proxy_url(url)
                 raise ValueError(
-                    f"Invalid proxy URL {url!r}: port {port} must be in range 1-65535"
+                    f"Invalid proxy URL {masked!r}: port {port} must be in range 1-65535"
                 )
 
 
