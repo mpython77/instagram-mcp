@@ -254,6 +254,19 @@ def test_follow_user_input():
     assert p2.action == "unfollow"
 
 
+def test_upload_reel_input():
+    from instagram_mcp.models import UploadReelInput
+    r = UploadReelInput(video_path="/tmp/reel.mp4")
+    assert r.video_path == "/tmp/reel.mp4"
+    assert r.caption == ""
+    assert r.cover_path is None
+    assert r.share_to_feed is True
+
+    r2 = UploadReelInput(video_path="/tmp/reel.mp4", caption="Test", share_to_feed=False)
+    assert r2.caption == "Test"
+    assert r2.share_to_feed is False
+
+
 def test_delete_comment_input():
     from instagram_mcp.models import DeleteCommentInput
     d = DeleteCommentInput(media_id="1234567890", comment_id="9876543210")

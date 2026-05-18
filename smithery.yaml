@@ -1,11 +1,11 @@
 name: instagram-mcp
-version: "1.2.0"
+version: "1.2.1"
 description: >
   Production-grade MCP server for Instagram and Threads — profile scraping,
   post analytics, DM inbox/send, hashtag research, story viewing and publishing,
-  social actions (like, follow, comment, block), Instagram Notes, broadcast
-  channels, Threads profiles and posts, and more. 45 tools total. No API key
-  needed for public tools; cookies.json required for authenticated features.
+  Reel upload, social actions (like, follow, comment, block), Instagram Notes,
+  broadcast channels, Threads profiles and posts, and more. 46 tools total.
+  No API key needed for public tools; cookies.json required for authenticated features.
 
 startCommand:
   type: stdio
@@ -112,6 +112,8 @@ tools:
     description: Download media from a post URL.
   - name: instagram_upload_photo
     description: Upload a photo post (AUTH).
+  - name: instagram_upload_reel
+    description: Upload a video as an Instagram Reel (AUTH).
   - name: instagram_analyze_engagement
     description: Engagement rate analytics for a profile.
   - name: instagram_compare_profiles

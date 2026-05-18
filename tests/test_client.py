@@ -820,6 +820,53 @@ async def test_publish_story_close_friends(client):
             assert sent_data.get("post_to_close_friends_only") == "1"
 
 
+# ── upload_reel tests ─────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_upload_reel_no_auth(mock_config, mock_proxy_manager, mock_rate_limiter, mock_cache):
+    cm = MagicMock()
+    cm.is_authenticated = False
+    unauthenticated_client = InstagramClient(
+        config=mock_config, proxy_manager=mock_proxy_manager,
+        rate_limiter=mock_rate_limiter, cache=mock_cache, cookie_manager=cm,
+    )
+    with pytest.raises(FetchError, match="requires authentication"):
+        await unauthenticated_client.upload_reel("/tmp/test.mp4")
+
+
+@pytest.mark.asyncio
+async def test_upload_reel_success(client):
+    mock_configure_resp = MagicMock()
+    mock_configure_resp.status_code = 200
+    mock_configure_resp.text = '{"status":"ok","media":{"pk":"111222333","code":"ReelABC"}}'
+    mock_configure_resp.json = lambda: {"status": "ok", "media": {"pk": "111222333", "code": "ReelABC"}}
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post = AsyncMock(return_value=mock_configure_resp)
+        with patch.object(client, "_upload_video", new_callable=AsyncMock) as mock_upload:
+            mock_upload.return_value = ("upload_id_reel_123", 30.0)
+            result = await client.upload_reel("/tmp/test.mp4", caption="Test reel")
+            assert result["ok"] is True
+            assert result["shortcode"] == "ReelABC"
+            assert result["media_id"] == "111222333"
+
+
+@pytest.mark.asyncio
+async def test_upload_reel_video_not_found(client):
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock):
+        with patch.object(client, "_upload_video", new_callable=AsyncMock) as mock_upload:
+            mock_upload.side_effect = FetchError("Video file not found: '/nonexistent.mp4'")
+            with pytest.raises(FetchError, match="Video file not found"):
+                await client.upload_reel("/nonexistent.mp4")
+
+
+@pytest.mark.asyncio
+async def test_upload_video_file_not_found(client):
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock):
+        with pytest.raises(FetchError, match="Video file not found"):
+            await client._upload_video(MagicMock(), "csrf", "cookie", "/nonexistent.mp4")
+
+
 # ── notes tests ───────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

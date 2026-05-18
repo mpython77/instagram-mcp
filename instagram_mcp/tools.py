@@ -109,6 +109,7 @@ from .models import (
     AccountReportInput,
     AudioReelsInput,
     UploadPhotoInput,
+    UploadReelInput,
     BulkProfilesInput,
     CollabNetworkInput,
     CompareProfilesInput,
@@ -3038,6 +3039,67 @@ def register_tools(
                 elapsed,
             )
             return format_upload_result_markdown(result, params.images)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_upload_reel
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("upload", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_upload_reel",
+            annotations={
+                "title": "Instagram Upload Reel",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_upload_reel(params: UploadReelInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Upload a video as an Instagram Reel.
+
+            Uploads an MP4 video and publishes it as a Reel.
+            Optionally specify a cover image, caption, and share-to-feed.
+
+            Args:
+                video_path: Absolute local path to an MP4 video file
+                caption: Optional caption (max 2200 chars)
+                cover_path: Optional local path to a JPEG/PNG cover image
+                disable_comments: Disable comments on the Reel
+                hide_like_count: Hide like count from viewers
+                share_to_feed: Also share to main feed (default: True)
+
+            Returns:
+                Reel URL and media_id on success.
+            """
+            await ctx.info(f"instagram_upload_reel: {params.video_path!r}")
+            await ctx.report_progress(0.0, 1.0, message="Uploading video...")
+            try:
+                result = await client.upload_reel(
+                    video_path=params.video_path,
+                    caption=params.caption,
+                    cover_path=params.cover_path,
+                    disable_comments=params.disable_comments,
+                    hide_like_count=params.hide_like_count,
+                    share_to_feed=params.share_to_feed,
+                )
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+            await ctx.report_progress(1.0, 1.0, message="Reel published!")
+            shortcode = result.get("shortcode", "")
+            url = result.get("url", "")
+            media_id = result.get("media_id", "")
+            lines = ["**Reel published successfully!**"]
+            if url:
+                lines.append(f"URL: {url}")
+            if media_id:
+                lines.append(f"media_id: {media_id}")
+            if params.caption:
+                lines.append(f"Caption: {params.caption[:80]}{'...' if len(params.caption) > 80 else ''}")
+            return "\n".join(lines)
 
     # ── TOOL 26: instagram_download ───────────────────────────────────────────
     if _enabled("download", requires_auth=True):

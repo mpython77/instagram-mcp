@@ -3225,6 +3225,185 @@ class InstagramClient:
             "story_url": f"https://www.instagram.com/stories/{uid}/{media_id}/" if media_id else "",
         }
 
+    async def _upload_video(
+        self,
+        session: Any,
+        csrf: str,
+        cookie_header: str,
+        path: str,
+        is_reel: bool = True,
+    ) -> Tuple[str, float]:
+        """
+        Upload a video file via rupload_igvideo.
+
+        Returns (upload_id, duration_seconds).
+        duration_seconds is extracted from the file metadata if ffprobe is available,
+        otherwise estimated from file size.
+        """
+        import os as _os
+
+        if not _os.path.isfile(path):
+            raise FetchError(f"Video file not found: {path!r}")
+
+        with open(path, "rb") as fh:
+            video_bytes = fh.read()
+
+        if not video_bytes:
+            raise FetchError(f"Video file is empty: {path!r}")
+
+        # Determine MIME type
+        ext = path.rsplit(".", 1)[-1].lower() if "." in path else "mp4"
+        mime = "video/mp4" if ext in ("mp4", "m4v") else f"video/{ext}"
+
+        # Try to get duration via ffprobe
+        duration = 0.0
+        try:
+            import subprocess as _sp
+            res = _sp.run(
+                ["ffprobe", "-v", "quiet", "-print_format", "json",
+                 "-show_format", path],
+                capture_output=True, text=True, timeout=10
+            )
+            if res.returncode == 0:
+                fmt = _json.loads(res.stdout).get("format", {})
+                duration = float(fmt.get("duration", 0.0))
+        except Exception:
+            pass
+
+        upload_id = str(int(time.time() * 1000)) + str(random.randint(100, 999))
+        content_len = len(video_bytes)
+        media_type = "2"  # video
+
+        rupload_params = _json.dumps({
+            "upload_id":    upload_id,
+            "media_type":   media_type,
+            "xsharing_user_ids": "[]",
+            "upload_media_duration_ms": str(int(duration * 1000)) if duration else "0",
+            "is_igtv_video": "0",
+            "is_clips_video": "1" if is_reel else "0",
+        })
+
+        url = f"https://www.instagram.com/rupload_igvideo/{upload_id}"
+        headers = {
+            "User-Agent":                  self._config.ig_user_agent,
+            "X-Instagram-Rupload-Params":  rupload_params,
+            "Content-Type":                mime,
+            "Content-Length":              str(content_len),
+            "X-Entity-Type":               mime,
+            "X-Entity-Name":               f"instagram_video_{upload_id}",
+            "X-Entity-Length":             str(content_len),
+            "Offset":                      "0",
+            "Accept-Encoding":             "gzip",
+            "x-ig-app-id":                self._config.ig_app_id,
+            "Cookie":                      cookie_header,
+            "x-csrftoken":                 csrf,
+            "Origin":                      "https://www.instagram.com",
+            "Referer":                     "https://www.instagram.com/",
+        }
+
+        try:
+            resp = await session.post(url, data=video_bytes, headers=headers, timeout=300)
+        except Exception as exc:
+            raise FetchError(f"video rupload request failed for {path!r}: {exc}") from exc
+
+        if resp.status_code == 401:
+            raise FetchError("video rupload 401 — session expired. Re-export cookies.")
+        if resp.status_code == 429:
+            raise FetchError("video rupload 429 — rate limited. Wait and retry.")
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"video rupload HTTP {resp.status_code}: {resp.text[:300]}")
+
+        try:
+            body = resp.json()
+        except Exception:
+            raise FetchError(f"video rupload returned non-JSON: {resp.text[:200]}")
+
+        uid = str(body.get("upload_id") or "")
+        if not uid:
+            raise FetchError(f"video rupload response missing upload_id: {body}")
+
+        return uid, duration
+
+    async def upload_reel(
+        self,
+        video_path: str,
+        caption: str = "",
+        cover_path: Optional[str] = None,
+        disable_comments: bool = False,
+        hide_like_count: bool = False,
+        share_to_feed: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Upload a video as an Instagram Reel. Auth required.
+
+        Flow:
+          1. Upload video bytes via /rupload_igvideo/
+          2. Optionally upload cover thumbnail via /rupload_igphoto/
+          3. POST to /api/v1/media/configure_to_reel/ with clip metadata
+
+        Returns:
+            dict with ok, shortcode, url, media_id, caption.
+        """
+        cm = self._cookie_manager
+        if cm is None or not getattr(cm, "is_authenticated", False):
+            raise FetchError("upload_reel requires authentication.")
+
+        session = await self._get_auth_session()
+        csrf = (cm.cookies.get("csrftoken", "") if cm else "") or ""
+        cookie_header = self._cookie_str()
+
+        # 1. Upload video
+        upload_id, duration = await self._upload_video(
+            session, csrf, cookie_header, video_path, is_reel=True
+        )
+
+        # 2. Optionally upload cover image
+        cover_upload_id = ""
+        if cover_path:
+            try:
+                cover_upload_id, _, _ = await self._upload_single_image(
+                    session, csrf, cookie_header, cover_path, is_sidecar=False
+                )
+            except Exception:
+                pass  # cover is optional
+
+        # 3. Configure as Reel
+        uid = (cm.cookies.get("ds_user_id", "") if cm else "") or ""
+        device_id = (cm.cookies.get("ig_did", "") if cm else "") or ""
+
+        clip_info: Dict[str, Any] = {
+            "is_clips_video": True,
+            "caption":        caption,
+        }
+        if duration:
+            clip_info["video_length"] = round(duration, 3)
+
+        payload: Dict[str, Any] = {
+            "upload_id":                     upload_id,
+            "source_type":                   "3",
+            "caption":                       caption,
+            "clips":                         [clip_info],
+            "extra":                         {"source_type": 3},
+            "audio_muted":                   False,
+            "poster_frame_index":            0,
+            "share_to_feed":                 "1" if share_to_feed else "0",
+            "disable_comments":              "1" if disable_comments else "0",
+            "like_and_view_counts_disabled": "1" if hide_like_count else "0",
+        }
+        if uid:
+            payload["_uid"] = uid
+        if device_id:
+            payload["_uuid"] = device_id
+            payload["device_id"] = device_id
+        if cover_upload_id:
+            payload["cover_upload_id"] = cover_upload_id
+
+        url = "https://www.instagram.com/api/v1/media/configure_to_reel/"
+        return await self._post_configure(
+            session, csrf, url, payload, "reel", 1,
+            cookie_header=cookie_header, as_json=True
+        )
+
     async def _post_configure(
         self,
         session: Any,

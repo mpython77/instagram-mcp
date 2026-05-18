@@ -1466,6 +1466,42 @@ class UploadPhotoInput(BaseModel):
     )
 
 
+class UploadReelInput(BaseModel):
+    """Input for instagram_upload_reel tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    video_path: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Absolute local path to the video file to upload as a Reel. "
+            "Supported format: MP4 (H.264 codec recommended). "
+            "Max recommended duration: 90 seconds."
+        ),
+    )
+    caption: str = Field(
+        default="",
+        max_length=2200,
+        description="Reel caption (max 2200 characters). Supports @mentions and #hashtags.",
+    )
+    cover_path: Optional[str] = Field(
+        default=None,
+        description="Optional local path to a JPEG/PNG cover image for the Reel.",
+    )
+    disable_comments: bool = Field(
+        default=False,
+        description="Disable comments on the Reel.",
+    )
+    hide_like_count: bool = Field(
+        default=False,
+        description="Hide the like count from viewers.",
+    )
+    share_to_feed: bool = Field(
+        default=True,
+        description="Whether to also share the Reel to the main feed (recommended: True).",
+    )
+
+
 # ── DM Tools ─────────────────────────────────────────────────────────────────
 
 class DMInboxInput(BaseModel):
