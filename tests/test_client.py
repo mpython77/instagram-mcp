@@ -922,3 +922,66 @@ async def test_broadcast_channel_redirected(client):
         mock_session.get = AsyncMock(return_value=mock_resp)
         with pytest.raises(FetchError, match="redirected"):
             await client.broadcast_channel_info("abc123")
+
+
+# ── threads tests ─────────────────────────────────────────────────────────────
+
+THREADS_PROFILE_RESPONSE = '{"data":{"userData":{"user":{"username":"zuck","full_name":"Mark Zuckerberg","biography":"Moving fast.","follower_count":1500000,"following_count":500,"media_count":250,"is_verified":true,"is_private":false,"profile_pic_url":"https://example.com/pic.jpg","pk":"4"}}}}'
+
+@pytest.mark.asyncio
+async def test_threads_profile_success(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = THREADS_PROFILE_RESPONSE
+    with patch.object(client, "_get_session", new_callable=AsyncMock) as mock_sess:
+        mock_session = mock_sess.return_value
+        mock_session.get = AsyncMock(return_value=mock_resp)
+        result = await client.threads_profile("zuck")
+        assert result["username"] == "zuck"
+        assert result["followers"] == 1500000
+        assert result["is_verified"] is True
+        assert result["pk"] == "4"
+
+
+@pytest.mark.asyncio
+async def test_threads_profile_strips_at(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = THREADS_PROFILE_RESPONSE
+    with patch.object(client, "_get_session", new_callable=AsyncMock) as mock_sess:
+        mock_session = mock_sess.return_value
+        mock_session.get = AsyncMock(return_value=mock_resp)
+        result = await client.threads_profile("@zuck")
+        assert result["username"] == "zuck"
+
+
+@pytest.mark.asyncio
+async def test_threads_profile_redirected(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 302
+    mock_resp.text = ""
+    with patch.object(client, "_get_session", new_callable=AsyncMock) as mock_sess:
+        mock_session = mock_sess.return_value
+        mock_session.get = AsyncMock(return_value=mock_resp)
+        with pytest.raises(FetchError, match="redirected"):
+            await client.threads_profile("someone")
+
+
+@pytest.mark.asyncio
+async def test_threads_user_posts_success(client):
+    posts_resp_text = '{"data":{"mediaData":{"edges":[{"node":{"thread_items":[{"post":{"pk":"111","caption":{"text":"hello threads"},"like_count":42,"taken_at":1700000000,"code":"abc123","text_post_app_info":{"direct_reply_count":5}}}]}}],"page_info":{"has_next_page":false,"end_cursor":null}}}}'
+    mock_profile_resp = MagicMock()
+    mock_profile_resp.status_code = 200
+    mock_profile_resp.text = THREADS_PROFILE_RESPONSE
+    mock_posts_resp = MagicMock()
+    mock_posts_resp.status_code = 200
+    mock_posts_resp.text = posts_resp_text
+    with patch.object(client, "_get_session", new_callable=AsyncMock) as mock_sess:
+        mock_session = mock_sess.return_value
+        mock_session.get = AsyncMock(side_effect=[mock_profile_resp, mock_posts_resp])
+        result = await client.threads_user_posts("zuck")
+        assert result["username"] == "zuck"
+        assert len(result["posts"]) == 1
+        assert result["posts"][0]["text"] == "hello threads"
+        assert result["posts"][0]["like_count"] == 42
+        assert result["has_more"] is False

@@ -1,11 +1,11 @@
 name: instagram-mcp
-version: "1.1.0"
+version: "1.2.0"
 description: >
-  Production-grade MCP server for Instagram — profile scraping, post analytics,
-  DM inbox/send, hashtag research, story viewing, social actions (like, follow,
-  comment, block), story publishing, Notes, broadcast channels, and more.
-  43 tools total. No API key needed for public tools; cookies.json required for
-  authenticated features.
+  Production-grade MCP server for Instagram and Threads — profile scraping,
+  post analytics, DM inbox/send, hashtag research, story viewing and publishing,
+  social actions (like, follow, comment, block), Instagram Notes, broadcast
+  channels, Threads profiles and posts, and more. 45 tools total. No API key
+  needed for public tools; cookies.json required for authenticated features.
 
 startCommand:
   type: stdio
@@ -96,6 +96,10 @@ tools:
     description: Delete an Instagram Note by ID (AUTH).
   - name: instagram_broadcast_channel
     description: Read broadcast channel info or posts (AUTH).
+  - name: instagram_threads_profile
+    description: Get a Threads profile (followers, bio, verification).
+  - name: instagram_threads_posts
+    description: Get recent posts from a Threads account.
   - name: instagram_edit_profile
     description: Update bio, name, or website (AUTH).
   - name: instagram_schedule

@@ -4948,3 +4948,165 @@ class InstagramClient:
             "next_max_id": body.get("next_max_id"),
             "has_more": bool(body.get("more_available") or body.get("next_max_id")),
         }
+
+    # ── Threads ───────────────────────────────────────────────────────────────
+
+    _THREADS_APP_ID = "238260118697367"  # Threads web app ID
+
+    def _threads_headers(self, extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        """Return base headers for Threads API calls (public endpoints, no auth)."""
+        h = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept": "application/json, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Sec-Fetch-Mode": "cors",
+            "x-ig-app-id": self._THREADS_APP_ID,
+        }
+        if extra:
+            h.update(extra)
+        return h
+
+    async def threads_profile(self, username: str) -> Dict[str, Any]:
+        """
+        Get a Threads profile by username (public, no auth required).
+
+        Fetches follower count, bio, verification status and recent thread count.
+
+        Returns:
+            dict with username, display_name, bio, followers, is_verified, threads_count.
+        """
+        username = username.lstrip("@").strip().lower()
+        if not username:
+            raise FetchError("threads_profile: username is required")
+
+        session = await self._get_session()
+        # Threads public GraphQL profile lookup
+        resp = await session.get(
+            "https://www.threads.net/api/graphql",
+            params={
+                "lsd": "AVqbxe3J_YA",
+                "variables": _json.dumps({"userID": "", "username": username, "__relay_internal__pv__BarcelonaIsLoggedInrelayprovider": False}),
+                "doc_id": "25025320444985689",
+            },
+            headers=self._threads_headers({
+                "x-fb-lsd": "AVqbxe3J_YA",
+                "x-fb-friendly-name": "BarcelonaProfileRootQuery",
+                "content-type": "application/x-www-form-urlencoded",
+            }),
+            allow_redirects=False,
+        )
+        if resp.status_code in (301, 302, 303, 307, 308):
+            raise FetchError("threads_profile: redirected — possibly rate-limited")
+        if resp.status_code != 200:
+            raise FetchError(f"threads_profile: HTTP {resp.status_code}")
+        body_text = resp.text
+        if body_text.lstrip().startswith("<"):
+            raise FetchError("threads_profile: got HTML response")
+        try:
+            body = _json.loads(body_text)
+        except Exception:
+            raise FetchError(f"threads_profile: invalid JSON: {body_text[:200]}")
+
+        # Navigate response tree
+        user_data = (
+            (body.get("data") or {}).get("userData") or
+            (body.get("data") or {}).get("user") or {}
+        )
+        u = user_data.get("user") or user_data
+        if not u:
+            raise FetchError(f"threads_profile: user '{username}' not found")
+
+        return {
+            "username": u.get("username", username),
+            "display_name": u.get("full_name", ""),
+            "bio": u.get("biography", ""),
+            "followers": u.get("follower_count", 0),
+            "following": u.get("following_count", 0),
+            "threads_count": u.get("media_count", 0),
+            "is_verified": bool(u.get("is_verified")),
+            "is_private": bool(u.get("is_private")),
+            "profile_pic_url": u.get("profile_pic_url", ""),
+            "pk": str(u.get("pk", u.get("id", ""))),
+        }
+
+    async def threads_user_posts(
+        self, username: str, max_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get recent Threads posts for a user (public, no auth required).
+
+        Returns:
+            dict with posts (list), next_max_id, has_more.
+        """
+        profile = await self.threads_profile(username)
+        user_id = profile.get("pk", "")
+        if not user_id:
+            raise FetchError(f"threads_user_posts: could not resolve user ID for '{username}'")
+
+        session = await self._get_session()
+        params: Dict[str, Any] = {
+            "lsd": "AVqbxe3J_YA",
+            "variables": _json.dumps({
+                "userID": user_id,
+                "count": 20,
+                "after": max_id or None,
+                "__relay_internal__pv__BarcelonaIsLoggedInrelayprovider": False,
+            }),
+            "doc_id": "7357985970980374",
+        }
+        resp = await session.get(
+            "https://www.threads.net/api/graphql",
+            params=params,
+            headers=self._threads_headers({
+                "x-fb-lsd": "AVqbxe3J_YA",
+                "x-fb-friendly-name": "BarcelonaProfileThreadsTabQuery",
+            }),
+            allow_redirects=False,
+        )
+        if resp.status_code in (301, 302, 303, 307, 308):
+            raise FetchError("threads_user_posts: redirected")
+        if resp.status_code != 200:
+            raise FetchError(f"threads_user_posts: HTTP {resp.status_code}")
+        body_text = resp.text
+        if body_text.lstrip().startswith("<"):
+            raise FetchError("threads_user_posts: got HTML")
+        try:
+            body = _json.loads(body_text)
+        except Exception:
+            raise FetchError(f"threads_user_posts: invalid JSON: {body_text[:200]}")
+
+        edges = (
+            ((body.get("data") or {}).get("mediaData") or {}).get("edges") or
+            ((body.get("data") or {}).get("user") or {}).get("threads", {}).get("edges") or
+            []
+        )
+        posts = []
+        for edge in edges:
+            node = edge.get("node") or {}
+            thread_items = node.get("thread_items") or []
+            for item in thread_items:
+                post = item.get("post") or {}
+                caption = (post.get("caption") or {}).get("text", "")
+                posts.append({
+                    "post_id": str(post.get("pk", post.get("id", ""))),
+                    "text": caption,
+                    "like_count": post.get("like_count", 0),
+                    "reply_count": post.get("text_post_app_info", {}).get("direct_reply_count", 0),
+                    "taken_at": post.get("taken_at"),
+                    "shortcode": post.get("code", ""),
+                })
+        page_info = (
+            ((body.get("data") or {}).get("mediaData") or {}).get("page_info") or
+            ((body.get("data") or {}).get("user") or {}).get("threads", {}).get("page_info") or
+            {}
+        )
+        return {
+            "username": username,
+            "posts": posts,
+            "next_max_id": page_info.get("end_cursor"),
+            "has_more": bool(page_info.get("has_next_page")),
+        }

@@ -297,3 +297,22 @@ def test_broadcast_channel_input():
     b2 = BroadcastChannelInput(channel_id="xyz", action="posts", max_id="cursor1")
     assert b2.action == "posts"
     assert b2.max_id == "cursor1"
+
+
+def test_threads_profile_input():
+    from instagram_mcp.models import ThreadsProfileInput
+    t = ThreadsProfileInput(username="@Zuck")
+    assert t.username == "zuck"
+
+    t2 = ThreadsProfileInput(username="  adam  ")
+    assert t2.username == "adam"
+
+
+def test_threads_posts_input():
+    from instagram_mcp.models import ThreadsPostsInput
+    t = ThreadsPostsInput(username="@test_user")
+    assert t.username == "test_user"
+    assert t.max_id is None
+
+    t2 = ThreadsPostsInput(username="alice", max_id="cursor_abc")
+    assert t2.max_id == "cursor_abc"

@@ -1781,6 +1781,33 @@ class BroadcastChannelInput(BaseModel):
     max_id: Optional[str] = Field(default=None, description="Pagination cursor from previous 'posts' call.")
 
 
+# ── Threads ───────────────────────────────────────────────────────────────────
+
+class ThreadsProfileInput(BaseModel):
+    """Input for instagram_threads_profile tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    username: str = Field(..., description="Threads username (with or without @).", min_length=1)
+
+    @field_validator("username")
+    @classmethod
+    def strip_at(cls, v: str) -> str:
+        return v.lstrip("@").strip().lower()
+
+
+class ThreadsPostsInput(BaseModel):
+    """Input for instagram_threads_posts tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    username: str = Field(..., description="Threads username (with or without @).", min_length=1)
+    max_id: Optional[str] = Field(default=None, description="Pagination cursor from previous call.")
+
+    @field_validator("username")
+    @classmethod
+    def strip_at(cls, v: str) -> str:
+        return v.lstrip("@").strip().lower()
+
+
 # ── Story Actions ──────────────────────────────────────────────────────────────
 
 class StoryMarkSeenInput(BaseModel):

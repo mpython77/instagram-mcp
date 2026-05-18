@@ -155,6 +155,8 @@ from .models import (
     NotesCreateInput,
     NotesDeleteInput,
     BroadcastChannelInput,
+    ThreadsProfileInput,
+    ThreadsPostsInput,
     StoryMarkSeenInput,
     StoryReplyInput,
     EditProfileInput,
@@ -4032,6 +4034,100 @@ def register_tools(
                     return "\n".join(lines)
                 else:
                     return f"Unknown action '{params.action}'. Use 'info' or 'posts'."
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_threads_profile
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("profile"):
+
+        @mcp.tool(
+            name="instagram_threads_profile",
+            annotations={
+                "title": "Threads Profile",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
+        async def instagram_threads_profile(params: ThreadsProfileInput, ctx: Context) -> str:
+            """
+            🌐 NO LOGIN REQUIRED — Get a Threads profile by username.
+
+            Fetches follower count, bio, verification status, and thread count from
+            Meta's Threads platform (threads.net).
+
+            Args:
+                username: Threads username (with or without @)
+
+            Returns:
+                Profile metadata including followers, bio, verification status.
+            """
+            await ctx.info(f"instagram_threads_profile: @{params.username}")
+            try:
+                data = await client.threads_profile(params.username)
+                verified = " ✓" if data["is_verified"] else ""
+                private = " 🔒" if data["is_private"] else ""
+                lines = [
+                    f"**@{data['username']}**{verified}{private}",
+                    f"Name: {data['display_name']}",
+                    f"Followers: {data['followers']:,} | Following: {data['following']:,}",
+                    f"Threads: {data['threads_count']:,}",
+                ]
+                if data.get("bio"):
+                    lines.append(f"Bio: {data['bio']}")
+                return "\n".join(lines)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_threads_posts
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("profile"):
+
+        @mcp.tool(
+            name="instagram_threads_posts",
+            annotations={
+                "title": "Threads Posts",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
+        async def instagram_threads_posts(params: ThreadsPostsInput, ctx: Context) -> str:
+            """
+            🌐 NO LOGIN REQUIRED — Get recent Threads posts for a user.
+
+            Fetches up to 20 recent threads/posts from Meta's Threads platform.
+            Use max_id from previous result for pagination.
+
+            Args:
+                username: Threads username (with or without @)
+                max_id: Pagination cursor from previous call
+
+            Returns:
+                List of recent posts with text, likes, replies, and timestamps.
+            """
+            await ctx.info(f"instagram_threads_posts: @{params.username}")
+            try:
+                data = await client.threads_user_posts(params.username, params.max_id)
+                posts = data["posts"]
+                if not posts:
+                    return f"No threads found for @{params.username}."
+                lines = [f"**Threads by @{data['username']} ({len(posts)} posts):**"]
+                for p in posts:
+                    preview = (p.get("text") or "[media]")[:120]
+                    lines.append(
+                        f"- [{p['post_id']}] {preview} | ❤️ {p.get('like_count', 0)} 💬 {p.get('reply_count', 0)}"
+                    )
+                if data.get("next_max_id"):
+                    lines.append(f"\n_Next page cursor: `{data['next_max_id']}`_")
+                return "\n".join(lines)
             except Exception as e:
                 raise _exception_to_tool_error(e)
 
