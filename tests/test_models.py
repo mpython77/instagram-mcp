@@ -232,3 +232,23 @@ def test_post_comments_input():
 def test_server_input():
     s = ServerInput(action="status")
     assert s.action == "status"
+
+
+def test_like_post_input():
+    from instagram_mcp.models import LikePostInput
+    p1 = LikePostInput(media_id="3612076889987614897")
+    assert p1.media_id == "3612076889987614897"
+    assert p1.action == "like"
+
+    p2 = LikePostInput(media_id="123", action="unlike")
+    assert p2.action == "unlike"
+
+
+def test_follow_user_input():
+    from instagram_mcp.models import FollowUserInput
+    p1 = FollowUserInput(user_id="47689974259")
+    assert p1.user_id == "47689974259"
+    assert p1.action == "follow"
+
+    p2 = FollowUserInput(user_id="123", action="unfollow")
+    assert p2.action == "unfollow"

@@ -618,3 +618,90 @@ async def test_fetch_comments_attempt_403(client):
         from instagram_mcp.exceptions import PrivateAccountError
         with pytest.raises(PrivateAccountError):
             await client._fetch_comments_attempt("mid", {}, None)
+
+
+@pytest.mark.asyncio
+async def test_like_post_success(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = '{"status":"ok"}'
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post = AsyncMock(return_value=mock_resp)
+        result = await client.like_post("123456", "like")
+        assert result["status"] == "liked"
+        assert result["media_id"] == "123456"
+
+
+@pytest.mark.asyncio
+async def test_like_post_unlike(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = '{"status":"ok"}'
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post = AsyncMock(return_value=mock_resp)
+        result = await client.like_post("123456", "unlike")
+        assert result["status"] == "unliked"
+
+
+@pytest.mark.asyncio
+async def test_like_post_redirected(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 302
+    mock_resp.text = ""
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post = AsyncMock(return_value=mock_resp)
+        with pytest.raises(FetchError, match="redirected"):
+            await client.like_post("123456", "like")
+
+
+@pytest.mark.asyncio
+async def test_like_post_invalid_action(client):
+    with pytest.raises(FetchError, match="action must be"):
+        await client.like_post("123456", "invalid")
+
+
+@pytest.mark.asyncio
+async def test_follow_user_success(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = '{"status":"ok","friendship_status":{"following":true,"is_private":false,"outgoing_request":false}}'
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post = AsyncMock(return_value=mock_resp)
+        result = await client.follow_user("47689974259", "follow")
+        assert result["status"] == "followed"
+        assert result["user_id"] == "47689974259"
+        assert result["following"] is True
+
+
+@pytest.mark.asyncio
+async def test_follow_user_unfollow(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = '{"status":"ok","friendship_status":{"following":false,"is_private":false,"outgoing_request":false}}'
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post = AsyncMock(return_value=mock_resp)
+        result = await client.follow_user("47689974259", "unfollow")
+        assert result["status"] == "unfollowed"
+
+
+@pytest.mark.asyncio
+async def test_follow_user_api_error(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = '{"status":"fail","message":"something went wrong"}'
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post = AsyncMock(return_value=mock_resp)
+        with pytest.raises(FetchError, match="API error"):
+            await client.follow_user("47689974259", "follow")
+
+
+@pytest.mark.asyncio
+async def test_follow_user_invalid_action(client):
+    with pytest.raises(FetchError, match="action must be"):
+        await client.follow_user("123", "invalid")
