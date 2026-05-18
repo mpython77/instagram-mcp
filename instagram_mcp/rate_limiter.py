@@ -15,11 +15,18 @@ Features:
 from __future__ import annotations
 
 import asyncio
+import enum
 import logging
 import random
 import time
 
 logger = logging.getLogger("instagram_mcp.rate_limiter")
+
+
+class _CBState(enum.Enum):
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
 
 
 class AdaptiveRateLimiter:
@@ -44,6 +51,7 @@ class AdaptiveRateLimiter:
         "_backoff_count", "_in_backoff",
         "_consecutive_429s", "_consecutive_successes",
         "_total_requests", "_total_429s", "_total_waits", "_total_wait_time",
+        "_cb_state", "_cb_until",
     )
 
     def __init__(
@@ -83,6 +91,9 @@ class AdaptiveRateLimiter:
         self._total_429s: int = 0
         self._total_waits: int = 0
         self._total_wait_time: float = 0.0
+
+        self._cb_state: _CBState = _CBState.CLOSED
+        self._cb_until: float = 0.0
 
     def _refill(self) -> None:
         """Refill tokens based on elapsed time. Caller must hold the lock."""

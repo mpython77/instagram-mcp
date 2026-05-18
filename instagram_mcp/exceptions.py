@@ -105,6 +105,18 @@ class PrivateAccountError(InstagramMCPError):
         super().__init__(message, **kwargs)
 
 
+class AuthError(InstagramMCPError):
+    """Authentication required — no valid cookies loaded."""
+
+    error_type = "auth_required"
+    suggested_action = (
+        "This tool requires an authenticated Instagram session. "
+        "Export your cookies from a logged-in Instagram browser session "
+        "and save them as cookies.json in the project directory. "
+        "See README → Authentication for setup instructions."
+    )
+
+
 class FetchError(InstagramMCPError):
     """Network / timeout / general fetch error."""
 

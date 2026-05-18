@@ -2,7 +2,7 @@
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![MCP](https://img.shields.io/badge/MCP-compatible-green) ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey) [![CI](https://github.com/mpython77/instagram-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mpython77/instagram-mcp/actions/workflows/ci.yml) [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/mpython77/instagram-mcp/pkgs/container/instagram-mcp)
 
-A production-grade MCP (Model Context Protocol) server for Instagram intelligence. Exposes **35 tools** across two auth tiers — 15 tools run fully anonymously with no credentials; the rest require a `cookies.txt` session file. Built on `curl_cffi` with Chrome TLS impersonation, adaptive rate limiting, smart caching, automatic JSON export, post scheduling, DM tools, account monitoring, multi-account sessions, and OAuth support.
+A production-grade MCP (Model Context Protocol) server for Instagram intelligence. Exposes **58 tools** across two auth tiers — 28 tools run fully anonymously with no credentials; the rest require a `cookies.json` session file. Built on `curl_cffi` with Chrome TLS impersonation, adaptive rate limiting, smart caching, automatic JSON export, post scheduling, DM tools, account monitoring, multi-account sessions, and OAuth support.
 
 Works natively with **Claude Desktop**, **Claude Code**, and any MCP-compatible AI client.
 
@@ -14,10 +14,9 @@ Works natively with **Claude Desktop**, **Claude Code**, and any MCP-compatible 
 
 | Tier | Symbol | Requirement | Tool count |
 |------|--------|-------------|-----------|
-| Anonymous | 🌐 | None — no login, no cookies | 15 tools |
-| Authenticated | 🔐 | `cookies.txt` with a valid Instagram session | 17 tools |
+| Anonymous | 🌐 | None — no login, no cookies | 28 tools |
+| Authenticated | 🔐 | `cookies.json` with a valid Instagram session | 29 tools |
 | Auto-mode | 🌐/🔐 | Works anonymously, upgrades when cookies present | 1 tool |
-| Server | — | Always available | 7 tools |
 
 `instagram_hashtag` auto-upgrades from anon to auth mode when cookies are present.
 
@@ -235,7 +234,7 @@ instagram_oauth(action="status")            # Check token validity
 
 ---
 
-## All 35 Tools
+## All 58 Tools
 
 ### 🗂️ Profile & Feed
 
@@ -468,6 +467,32 @@ Discover accounts Instagram considers similar via the internal chaining API.
 
 ---
 
+#### `instagram_hashtag_suggest` 🌐
+
+Suggest related hashtags for a niche by analyzing top posts under the seed hashtag. Extracts all hashtags from captions, ranks by frequency, classifies by tier, and returns a ready-to-copy set.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `seed_hashtag` | str | required | Seed hashtag (with or without #) |
+| `target_count` | int | `30` | How many hashtags to return (5–50) |
+
+**Output:** seed, posts_analyzed, unique_hashtags_found, tiers (mega/macro/mid/micro), balanced_set list, copy_paste string.
+
+---
+
+#### `instagram_caption_analyze` 🌐
+
+Analyzes caption patterns across recent posts for a public account. Reports average caption length, hashtag density, emoji usage rate, CTA rate, top hashtags, and actionable insights.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `username` | str | required | Instagram username (without @) |
+| `max_posts` | int | `20` | Posts to analyze (5–50) |
+
+**Output:** avg_caption_length, avg_hashtag_count, emoji_usage_rate, cta_usage_rate, top_hashtags, top_posts_by_likes, insights.
+
+---
+
 #### `instagram_search` 🔐
 
 Search Instagram for accounts and/or hashtags by keyword.
@@ -534,6 +559,49 @@ Fetch content that an account actively reposted from other creators (Reposts Tab
 | `max_posts` | int | `50` | Max repost items (1–200) |
 
 **Signal:** A repost is an explicit endorsement — stronger relationship signal than a tag or mention.
+
+---
+
+#### `instagram_user_search` 🔐
+
+Search Instagram users by username or display name. Returns ranked results with follower counts.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | str | required | Search query (username or name) |
+| `count` | int | `10` | Max results (1–50) |
+
+**Per user:** username, full_name, is_verified, is_private, follower_count.
+
+**Distinction from `instagram_search`:** This tool targets users only via the authenticated user-search API (higher quality ranking). `instagram_search` is anonymous and covers both users and hashtags.
+
+---
+
+#### `instagram_user_followers` 🔐
+
+Fetch the followers list for any user by their numeric `user_id`. Supports pagination.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `user_id` | str | required | Numeric Instagram user ID (get from `instagram_profile`) |
+| `count` | int | `50` | Users per page (1–200) |
+| `max_id` | str | `""` | Pagination cursor from previous result's `next_max_id` |
+
+**Per user:** username, full_name, is_verified, is_private, user_id. Returns `next_max_id` for pagination.
+
+---
+
+#### `instagram_user_following` 🔐
+
+Fetch the following list for any user by their numeric `user_id`. Supports pagination.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `user_id` | str | required | Numeric Instagram user ID (get from `instagram_profile`) |
+| `count` | int | `50` | Users per page (1–200) |
+| `max_id` | str | `""` | Pagination cursor from previous result's `next_max_id` |
+
+**Per user:** username, full_name, is_verified, is_private, user_id. Returns `next_max_id` for pagination.
 
 ---
 
@@ -622,6 +690,23 @@ Upload 1–10 images to Instagram as a post (single photo or carousel). Returns 
 
 ---
 
+#### `instagram_upload_reel` 🔐
+
+Upload an MP4 video and publish it as an Instagram Reel.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `video_path` | str | required | Absolute local path to an MP4 video file (H.264 recommended, max 90s) |
+| `caption` | str | `""` | Reel caption (max 2200 chars). Supports @mentions and #hashtags |
+| `cover_path` | str | `null` | Optional local path to a JPEG/PNG cover image |
+| `disable_comments` | bool | `false` | Disable comments on the Reel |
+| `hide_like_count` | bool | `false` | Hide like count from viewers |
+| `share_to_feed` | bool | `true` | Also share the Reel to the main feed |
+
+**Returns:** Reel URL and `media_id` on success.
+
+---
+
 #### `instagram_download` 🔐
 
 Download all media files from an Instagram post to a local directory.
@@ -651,6 +736,227 @@ Download all media files from an Instagram post to a local directory.
 - `/home/user/downloads/DXjuqH9nDVE_3.mp4` (8,204 KB, mp4)
 - `/home/user/downloads/DXjuqH9nDVE_4.jpg` (477 KB, jpg)
 ```
+
+---
+
+### 💬 DM Actions
+
+#### `instagram_dm_react` 🔐
+
+Add or remove an emoji reaction to a DM message.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `thread_id` | str | required | Thread ID from `instagram_dm_inbox` |
+| `item_id` | str | required | Message item_id to react to |
+| `emoji` | str | `"❤"` | Emoji to react with |
+| `action` | str | `"react"` | `react` to add reaction, `unreact` to remove |
+
+---
+
+#### `instagram_dm_unsend` 🔐
+
+Delete a DM message (removes it for all participants in the thread).
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `thread_id` | str | required | Thread ID from `instagram_dm_inbox` |
+| `item_id` | str | required | Message item_id to delete |
+
+**Destructive:** Cannot be undone. Removes the message for everyone in the thread.
+
+---
+
+#### `instagram_dm_mark_seen` 🔐
+
+Mark a DM thread as seen up to a specific message (clears the unread indicator).
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `thread_id` | str | required | Thread ID to mark as seen |
+| `item_id` | str | required | item_id of the last message to mark as read |
+
+---
+
+### ✋ Interactions
+
+#### `instagram_post_like` 🔐
+
+Like or unlike an Instagram post.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `media_id` | str | required | Numeric media_id of the post |
+| `action` | str | `"like"` | `like` or `unlike` |
+
+**How to find media_id:** Use `instagram_post` — it returns `media_id` in the result.
+
+---
+
+#### `instagram_post_save` 🔐
+
+Save (bookmark) or unsave an Instagram post.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `media_id` | str | required | Numeric media_id of the post |
+| `action` | str | `"save"` | `save` to bookmark, `unsave` to remove |
+
+---
+
+#### `instagram_post_comment` 🔐
+
+Post a comment on an Instagram post.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `media_id` | str | required | Numeric media_id of the post |
+| `text` | str | required | Comment text (max 2200 chars) |
+
+**Returns:** comment_id and the posted text on success.
+
+---
+
+#### `instagram_delete_comment` 🔐
+
+Delete a comment from an Instagram post. You can delete your own comments on any post, or any comment on your own posts.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `media_id` | str | required | Numeric media_id of the post (from `instagram_post`) |
+| `comment_id` | str | required | Numeric comment_id to delete (from `instagram_post_comments`) |
+
+**Destructive:** Cannot be undone.
+
+---
+
+#### `instagram_follow_user` 🔐
+
+Follow or unfollow a user by their numeric user_id.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `user_id` | str | required | Numeric Instagram user ID |
+| `action` | str | `"follow"` | `follow` or `unfollow` |
+
+**Note:** If the target account is private, following sends a follow request instead of immediately following.
+
+---
+
+#### `instagram_block_user` 🔐
+
+Block or unblock a user by their numeric user_id.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `user_id` | str | required | Numeric Instagram user ID |
+| `action` | str | `"block"` | `block` or `unblock` |
+
+**Destructive:** Blocking removes the user from your followers and prevents them from seeing your content.
+
+---
+
+#### `instagram_edit_profile` 🔐
+
+Edit your Instagram profile fields. Only provide the fields you want to change — others are kept as-is.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `biography` | str | `null` | New bio text (max 150 chars) |
+| `full_name` | str | `null` | New display name (max 30 chars) |
+| `external_url` | str | `null` | New website URL |
+| `email` | str | `null` | New email address |
+| `phone_number` | str | `null` | New phone number |
+
+**Returns:** Updated profile with username, full_name, biography, and external_url.
+
+---
+
+#### `instagram_publish_story` 🔐
+
+Publish a photo as an Instagram Story (visible for 24 hours).
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `image_path` | str | required | Local path to a JPEG or PNG image file |
+| `close_friends_only` | bool | `false` | Publish to Close Friends list only |
+
+**Returns:** `media_id` of the published story.
+
+---
+
+#### `instagram_story_mark_seen` 🔐
+
+Mark one or more stories as viewed. Use after fetching stories with `instagram_stories`.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `reel_ids` | list[str] | required | List of story media_ids to mark as seen |
+| `owner_ids` | list[str] | required | List of owner user_ids (one per story) |
+| `taken_ats` | list[int] | required | List of taken_at Unix timestamps (one per story) |
+
+**Workflow:** Call `instagram_stories` → extract `media_id`, `owner_id`, and `taken_at` per item → pass them here.
+
+---
+
+#### `instagram_story_reply` 🔐
+
+Reply to a story by sending a DM to the story owner.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `username` | str | required | Story owner's Instagram username |
+| `text` | str | required | Reply message text (max 1000 chars) |
+
+**Note:** Sends a direct message to the account's DM inbox referencing their story.
+
+---
+
+### 📢 Broadcast & Threads
+
+#### `instagram_broadcast_channel` 🔐
+
+Read an Instagram Broadcast Channel — one-way creator update channels accessible to followers.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `channel_id` | str | required | Broadcast channel ID |
+| `action` | str | `"info"` | `info` for channel metadata; `posts` for recent messages |
+| `max_id` | str | `null` | Pagination cursor from a previous `posts` call |
+
+**Actions:**
+
+| Action | Returns |
+|--------|---------|
+| `info` | title, description, subscriber_count, broadcast_status |
+| `posts` | list of posts with text, like_count, and next_max_id cursor |
+
+---
+
+#### `instagram_threads_profile` 🌐
+
+Get a profile from Meta's Threads platform (`threads.net`).
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `username` | str | required | Threads username (with or without @) |
+
+**Returns:** username, display_name, followers, following, threads_count, bio, is_verified, is_private.
+
+**Note:** Uses the Threads API — no Instagram cookies required.
+
+---
+
+#### `instagram_threads_posts` 🌐
+
+Get recent posts (threads) for a Threads user. Supports pagination.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `username` | str | required | Threads username (with or without @) |
+| `max_id` | str | `null` | Pagination cursor from previous result's `next_max_id` |
+
+**Per post:** post_id, text preview, like_count, reply_count. Returns up to 20 posts per page.
 
 ---
 
@@ -825,7 +1131,9 @@ All settings are configurable via environment variables.
 | `INSTAGRAM_MCP_TOOLSETS` | `all` | Comma-separated toolset names to enable |
 | `INSTAGRAM_MCP_HIDE_AUTH_WHEN_NO_COOKIES` | `""` | Set `1` to hide auth-only tools when no cookies loaded |
 
-**Valid toolset names:** `profile`, `analysis`, `content`, `social_graph`, `batch`, `upload`, `download`, `server`, `all`
+**Valid toolset names:** `profile`, `analysis`, `content`, `social_graph`, `social`, `batch`, `upload`, `download`, `server`, `all`
+
+The `social` toolset covers interaction tools: `instagram_delete_comment`, `instagram_publish_story`, `instagram_broadcast_channel`.
 
 The `server` toolset (`instagram_server`) is always enabled regardless of selection.
 
@@ -990,6 +1298,16 @@ Each JSON file has three top-level keys:
 | "Post this photo to Instagram" | `instagram_upload_photo images=[/path/to/photo.jpg] caption="caption text"` |
 | "Clear the cache for @nike" | `instagram_server action=clear_user username=nike` |
 | "Check proxy and cache health" | `instagram_server action=status` |
+| "Like this post" | `instagram_post_like media_id=3612076889987614897` |
+| "Save this post for later" | `instagram_post_save media_id=3612076889987614897` |
+| "Comment 'Great work!' on this post" | `instagram_post_comment media_id=3612076889987614897 text="Great work!"` |
+| "Follow user 47689974259" | `instagram_follow_user user_id=47689974259` |
+| "Unfollow user 47689974259" | `instagram_follow_user user_id=47689974259 action=unfollow` |
+| "Upload a reel" | `instagram_upload_reel video_path=/tmp/video.mp4 caption="My reel"` |
+| "Publish a story" | `instagram_publish_story image_path=/tmp/photo.jpg` |
+| "Search for users named 'john'" | `instagram_user_search query=john count=20` |
+| "Get @natgeo's Threads profile" | `instagram_threads_profile username=natgeo` |
+| "Get recent Threads posts for @zuck" | `instagram_threads_posts username=zuck` |
 
 ---
 
@@ -1005,7 +1323,7 @@ Each JSON file has three top-level keys:
 ┌─────────────────────▼───────────────────────────────────────────┐
 │                  FastMCP Server  (mcp.server.fastmcp)           │
 │                                                                 │
-│  tools.py ── 26 tool handlers (async, ctx: Context)             │
+│  tools.py ── 58 tool handlers (async, ctx: Context)             │
 │  models.py ── Pydantic input validation + dataclasses           │
 │  formatter.py ── Markdown output generation                     │
 │  exporter.py ── AI-optimised JSON auto-save                     │
@@ -1066,8 +1384,7 @@ Each JSON file has three top-level keys:
 - **Comments:** Very active posts may return fewer comments than requested — Instagram caps the returned count.
 - **Rate limits:** Anonymous requests share a pool per IP. Heavy use without proxies will trigger 429 responses. The adaptive rate limiter handles backoff automatically.
 - **Session expiry:** `cookies.txt` sessions expire. Long-running deployments need periodic cookie refresh. Use `instagram_server action=reload_cookies` to refresh without restarting.
-- **No write operations except upload:** The server cannot like, comment, follow, or modify Instagram data other than publishing posts via `instagram_upload_photo`.
-- **No DMs or notifications:** Private messaging, notification feeds, and activity feeds are not implemented.
+- **Write operations:** Like, comment, follow, block, save, edit profile, publish story, upload reel, and DM reactions all require a valid authenticated session. Rate limiting applies — avoid rapid consecutive write calls.
 - **Carousel media:** `instagram_download` fetches all slides; `instagram_feed_deep` returns only the slide count.
 - **Historical data:** Instagram does not expose posts older than the account's paginated feed allows.
 
@@ -1077,7 +1394,7 @@ Each JSON file has three top-level keys:
 
 **Q: Do I need to log in to use this?**
 
-No. 15 tools work completely anonymously with no account or cookies required. 11 tools require a `cookies.txt` file. `instagram_hashtag` automatically switches between anon and auth modes depending on whether cookies are present.
+No. 28 tools work completely anonymously with no account or cookies required. 29 tools require a `cookies.json` file. `instagram_hashtag` automatically switches between anon and auth modes depending on whether cookies are present.
 
 **Q: Why use `curl_cffi` instead of `requests` or `aiohttp`?**
 

@@ -3,6 +3,7 @@ import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 from instagram_mcp.client import InstagramClient, FetchError, _mask_proxy
+from instagram_mcp.exceptions import AuthError
 from instagram_mcp.config import MCPConfig
 from instagram_mcp.models import DateRange
 
@@ -81,6 +82,34 @@ def test_mask_proxy():
     assert _mask_proxy("http://user:pass@host:8080") == "http://***@host:8080"
     assert _mask_proxy("http://host:8080") == "http://host:8080"
     assert _mask_proxy("invalid-url") == "invalid-url"
+
+
+@pytest.mark.asyncio
+async def test_get_auth_session_no_cookies(mock_config, mock_proxy_manager, mock_rate_limiter, mock_cache):
+    cm = MagicMock()
+    cm.is_authenticated = False  # no cookies
+    client_no_auth = InstagramClient(
+        config=mock_config,
+        proxy_manager=mock_proxy_manager,
+        rate_limiter=mock_rate_limiter,
+        cache=mock_cache,
+        cookie_manager=cm,
+    )
+    with pytest.raises(AuthError):
+        await client_no_auth._get_auth_session()
+
+
+@pytest.mark.asyncio
+async def test_get_auth_session_no_manager(mock_config, mock_proxy_manager, mock_rate_limiter, mock_cache):
+    client_no_auth = InstagramClient(
+        config=mock_config,
+        proxy_manager=mock_proxy_manager,
+        rate_limiter=mock_rate_limiter,
+        cache=mock_cache,
+        cookie_manager=None,
+    )
+    with pytest.raises(AuthError):
+        await client_no_auth._get_auth_session()
 
 def test_client_init(client, mock_config, mock_proxy_manager, mock_rate_limiter, mock_cache, mock_cookie_manager):
     assert client.config == mock_config
@@ -992,3 +1021,131 @@ async def test_threads_user_posts_success(client):
         assert result["has_more"] is False
         # posts may be empty if regex doesn't match minimal HTML — that's acceptable
         assert isinstance(result["posts"], list)
+
+
+# ── hashtag_suggest tests ──────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_hashtag_suggest_success(client):
+    posts = [
+        {"caption": "#travel #photography great trip", "like_count": 1000},
+        {"caption": "#travel #adventure exploring", "like_count": 500},
+        {"caption": "#photography #landscape beautiful", "like_count": 200},
+    ]
+    with patch.object(client, "fetch_hashtag", new_callable=AsyncMock) as mock_fetch, \
+         patch.object(client, "_fetch_hashtag_info", new_callable=AsyncMock) as mock_info:
+        mock_fetch.return_value = {"posts": posts, "has_more": False, "auth_used": False}
+        mock_info.return_value = {"media_count": 5000000}
+        result = await client.hashtag_suggest("travel", target_count=10)
+        assert result["seed"] == "travel"
+        assert result["posts_analyzed"] == 3
+        assert result["unique_hashtags_found"] >= 3
+        assert "copy_paste" in result
+        assert result["copy_paste"].startswith("#")
+
+
+@pytest.mark.asyncio
+async def test_hashtag_suggest_no_posts(client):
+    with patch.object(client, "fetch_hashtag", new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.return_value = {"posts": [], "has_more": False, "auth_used": False}
+        with pytest.raises(FetchError, match="hashtag_suggest"):
+            await client.hashtag_suggest("emptytag")
+
+
+@pytest.mark.asyncio
+async def test_hashtag_suggest_strips_hash(client):
+    posts = [
+        {"caption": "#travel #photography", "like_count": 100},
+    ]
+    with patch.object(client, "fetch_hashtag", new_callable=AsyncMock) as mock_fetch, \
+         patch.object(client, "_fetch_hashtag_info", new_callable=AsyncMock) as mock_info:
+        mock_fetch.return_value = {"posts": posts, "has_more": False, "auth_used": False}
+        mock_info.return_value = {"media_count": 0}
+        result = await client.hashtag_suggest("#travel")
+        assert result["seed"] == "travel"
+
+
+# ── caption_analyze tests ──────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_caption_analyze_success(client):
+    user_data = {
+        "id": "12345",
+        "username": "testuser",
+        "edge_owner_to_timeline_media": {
+            "edges": [
+                {"node": {
+                    "edge_media_to_caption": {"edges": [{"node": {"text": "Check the link in bio! #travel #photography great shot"}}]},
+                    "edge_media_preview_like": {"count": 1000},
+                }},
+                {"node": {
+                    "edge_media_to_caption": {"edges": [{"node": {"text": "Amazing view today!"}}]},
+                    "edge_media_preview_like": {"count": 500},
+                }},
+                {"node": {
+                    "edge_media_to_caption": {"edges": [{"node": {"text": "#adventure #explore #travel tag a friend below"}}]},
+                    "edge_media_preview_like": {"count": 200},
+                }},
+            ],
+            "page_info": {"has_next_page": False, "end_cursor": ""},
+        },
+    }
+    with patch.object(client, "fetch_user", new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.return_value = user_data
+        result = await client.caption_analyze("testuser", max_posts=10)
+        assert result["username"] == "testuser"
+        assert result["posts_analyzed"] == 3
+        assert result["avg_caption_length"] > 0
+        assert "insights" in result
+        assert isinstance(result["top_hashtags"], list)
+
+
+@pytest.mark.asyncio
+async def test_caption_analyze_user_not_found(client):
+    with patch.object(client, "fetch_user", new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.return_value = None
+        with pytest.raises(FetchError, match="not found"):
+            await client.caption_analyze("nonexistent")
+
+
+@pytest.mark.asyncio
+async def test_caption_analyze_private_account(client):
+    user_data = {"id": "12345", "username": "privateuser", "is_private": True}
+    with patch.object(client, "fetch_user", new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.return_value = user_data
+        with pytest.raises(FetchError, match="private"):
+            await client.caption_analyze("privateuser")
+
+
+@pytest.mark.asyncio
+async def test_caption_analyze_fetches_more_pages(client):
+    user_data = {
+        "id": "12345",
+        "username": "testuser",
+        "edge_owner_to_timeline_media": {
+            "edges": [
+                {"node": {
+                    "edge_media_to_caption": {"edges": [{"node": {"text": "Post 1 #tag"}}]},
+                    "edge_media_preview_like": {"count": 100},
+                }},
+            ],
+            "page_info": {"has_next_page": True, "end_cursor": "cursor123"},
+        },
+    }
+    extra_feed = {
+        "edges": [
+            {"node": {
+                "edge_media_to_caption": {"edges": [{"node": {"text": "Post 2 #more"}}]},
+                "edge_media_preview_like": {"count": 200},
+            }},
+        ],
+        "end_cursor": "",
+        "has_next_page": False,
+    }
+    with patch.object(client, "fetch_user", new_callable=AsyncMock) as mock_user, \
+         patch.object(client, "fetch_user_feed", new_callable=AsyncMock) as mock_feed:
+        mock_user.return_value = user_data
+        mock_feed.return_value = extra_feed
+        result = await client.caption_analyze("testuser", max_posts=10)
+        assert result["posts_analyzed"] == 2
+        mock_feed.assert_called_once()

@@ -312,8 +312,11 @@ class ProxyStatus:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _clean_username(v: str) -> str:
-    """Clean username — remove @ symbol and spaces."""
-    return v.lstrip("@").strip().lower()
+    """Clean username — remove @ symbol and spaces. Raises ValueError if empty after cleaning."""
+    cleaned = v.lstrip("@").strip().lower()
+    if not cleaned:
+        raise ValueError("Username cannot be empty after stripping @ and whitespace")
+    return cleaned
 
 
 # ── Kept for backwards-compatibility with batch_runner internal usage ────────
@@ -1885,3 +1888,42 @@ class SessionInput(BaseModel):
             "  'status' — same as list but with more detail"
         ),
     )
+
+
+# ── Hashtag Suggest ───────────────────────────────────────────────────────────
+
+class HashtagSuggestInput(BaseModel):
+    """Input for instagram_hashtag_suggest tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    seed_hashtag: str = Field(
+        ...,
+        description="Seed hashtag to build suggestions from (with or without #).",
+        min_length=1,
+    )
+    target_count: int = Field(
+        default=30,
+        description="Number of hashtags to return (max 50).",
+        ge=5,
+        le=50,
+    )
+
+
+# ── Caption Analyze ───────────────────────────────────────────────────────────
+
+class CaptionAnalyzeInput(BaseModel):
+    """Input for instagram_caption_analyze tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    username: str = Field(..., description="Instagram username to analyze.", min_length=1)
+    max_posts: int = Field(
+        default=20,
+        description="Number of recent posts to analyze (max 50).",
+        ge=5,
+        le=50,
+    )
+
+    @field_validator("username")
+    @classmethod
+    def clean_username(cls, v: str) -> str:
+        return _clean_username(v)

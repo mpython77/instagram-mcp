@@ -129,6 +129,9 @@ def test_pydantic_username_input():
     u = UsernameInput(username=" @Test ")
     assert u.username == "test"
 
+    with pytest.raises(Exception):
+        UsernameInput(username="@")  # bare @ → empty after strip
+
 def test_profile_input():
     p = ProfileInput(username="test", since_date="01.03.2026", until_date="01/04/2026")
     assert isinstance(p.resolved_since(), int)
@@ -313,3 +316,47 @@ def test_threads_posts_input():
 
     t2 = ThreadsPostsInput(username="alice", max_id="cursor_abc")
     assert t2.max_id == "cursor_abc"
+
+
+def test_caption_analyze_input():
+    from instagram_mcp.models import CaptionAnalyzeInput
+    # @ symbol is stripped
+    c = CaptionAnalyzeInput(username="@natgeo")
+    assert c.username == "natgeo"
+
+    # whitespace and case normalized
+    c2 = CaptionAnalyzeInput(username="  NatGeo  ")
+    assert c2.username == "natgeo"
+
+    # default max_posts
+    assert c2.max_posts == 20
+
+    # bounds
+    c3 = CaptionAnalyzeInput(username="user", max_posts=50)
+    assert c3.max_posts == 50
+
+    with pytest.raises(Exception):
+        CaptionAnalyzeInput(username="@")  # @ alone → empty after strip
+
+    with pytest.raises(Exception):
+        CaptionAnalyzeInput(username="user", max_posts=4)  # below ge=5
+
+    with pytest.raises(Exception):
+        CaptionAnalyzeInput(username="user", max_posts=51)  # above le=50
+
+
+def test_hashtag_suggest_input():
+    from instagram_mcp.models import HashtagSuggestInput
+    h = HashtagSuggestInput(seed_hashtag="fitness")
+    assert h.seed_hashtag == "fitness"
+    assert h.target_count == 30
+
+    h2 = HashtagSuggestInput(seed_hashtag="#travel", target_count=10)
+    assert h2.seed_hashtag == "#travel"
+    assert h2.target_count == 10
+
+    with pytest.raises(Exception):
+        HashtagSuggestInput(seed_hashtag="x", target_count=4)  # below ge=5
+
+    with pytest.raises(Exception):
+        HashtagSuggestInput(seed_hashtag="x", target_count=51)  # above le=50

@@ -30,7 +30,7 @@ import json as _json
 from .cache import SmartCache
 from .config import MCPConfig
 from .cookie_manager import CookieManager
-from .exceptions import FetchError
+from .exceptions import AuthError, FetchError
 from .models import DateRange
 from .proxy_manager import ProxyManager
 from .rate_limiter import AdaptiveRateLimiter
@@ -161,9 +161,16 @@ class InstagramClient:
             logger.debug("Session invalidated: %s", _mask_proxy(proxy_url))
 
     async def _get_auth_session(self) -> AsyncSession:
-        """Return the single authenticated AsyncSession, creating it if needed."""
+        """Return the single authenticated AsyncSession, creating it if needed.
+
+        Raises FetchError if no valid cookies are loaded — callers can convert
+        this to a user-facing 'auth required' message.
+        """
         if self._closed:
             raise FetchError("Client is closed")
+        cm = self._cookie_manager
+        if not (cm and cm.is_authenticated):
+            raise AuthError()
         async with self._auth_session_lock:
             if self._auth_session is None:
                 cm = self._cookie_manager
@@ -5149,3 +5156,259 @@ class InstagramClient:
             "next_max_id": None,
             "has_more": False,
         }
+
+    # ── Hashtag Suggestions ───────────────────────────────────────────────────
+
+    async def hashtag_suggest(
+        self,
+        seed_hashtag: str,
+        target_count: int = 30,
+    ) -> Dict[str, Any]:
+        """
+        Suggest related hashtags for a niche by analyzing top posts under the seed hashtag.
+
+        Fetches top posts, extracts all hashtags they use, ranks by frequency,
+        and groups them into tiers by follower count for reach diversification.
+
+        Returns:
+            dict with seed, suggested hashtags grouped by tier (mega/macro/mid/micro),
+            and a ready-to-use copy-paste set.
+        """
+        import re as _re
+
+        seed = seed_hashtag.lstrip("#").strip().lower()
+        if not seed:
+            raise FetchError("hashtag_suggest: seed_hashtag is required")
+
+        # Fetch top posts for the seed hashtag
+        result = await self.fetch_hashtag(seed, max_posts=24)
+        posts = result.get("posts", []) if result else []
+        if not posts:
+            raise FetchError(f"hashtag_suggest: no posts found for #{seed}")
+
+        # Extract all hashtags from captions
+        hashtag_freq: Dict[str, int] = {}
+        for post in posts:
+            caption = post.get("caption") or ""
+            tags = _re.findall(r"#([A-Za-z0-9_]+)", caption)
+            for tag in tags:
+                t = tag.lower()
+                if t != seed:
+                    hashtag_freq[t] = hashtag_freq.get(t, 0) + 1
+
+        # Sort by frequency
+        ranked = sorted(hashtag_freq.items(), key=lambda x: -x[1])
+
+        # Take top tags up to target_count
+        top_tags = [tag for tag, _ in ranked[:target_count]]
+
+        # Fetch follower counts for the top 15 tags in parallel to tier them
+        async def _get_count(tag: str) -> int:
+            try:
+                info = await self._fetch_hashtag_info(tag)
+                return info.get("media_count", 0)
+            except Exception:
+                return 0
+
+        semaphore = asyncio.Semaphore(5)
+
+        async def _bounded(tag: str) -> tuple:
+            async with semaphore:
+                return tag, await _get_count(tag)
+
+        counts_pairs = await asyncio.gather(*[_bounded(t) for t in top_tags[:15]])
+        count_map = dict(counts_pairs)
+
+        # Tier classification (by media count, not follower count)
+        mega, macro, mid, micro, remaining = [], [], [], [], []
+        for tag in top_tags:
+            n = count_map.get(tag, 0)
+            if n >= 10_000_000:
+                mega.append(tag)
+            elif n >= 1_000_000:
+                macro.append(tag)
+            elif n >= 100_000:
+                mid.append(tag)
+            elif n > 0:
+                micro.append(tag)
+            else:
+                remaining.append(tag)  # no count fetched (beyond top-15)
+
+        # Build a balanced suggested set: 2 mega + 5 macro + 10 mid + 10 micro
+        balanced = (mega[:2] + macro[:5] + mid[:10] + micro[:10] + remaining)[:target_count]
+        copy_paste = " ".join(f"#{t}" for t in balanced)
+
+        return {
+            "seed": seed,
+            "posts_analyzed": len(posts),
+            "unique_hashtags_found": len(hashtag_freq),
+            "tiers": {
+                "mega_10M_plus": mega[:5],
+                "macro_1M_10M": macro[:10],
+                "mid_100k_1M": mid[:15],
+                "micro_under_100k": micro[:15],
+            },
+            "balanced_set": balanced,
+            "copy_paste": copy_paste,
+        }
+
+    async def _fetch_hashtag_info(self, tag: str) -> Dict[str, Any]:
+        """Get media_count for a hashtag via the web API."""
+        session = await self._get_session(None)
+        url = f"https://www.instagram.com/explore/tags/{tag}/?__a=1&__d=dis"
+        headers = {
+            "x-ig-app-id": "936619743392459",
+            "x-requested-with": "XMLHttpRequest",
+            "referer": f"https://www.instagram.com/explore/tags/{tag}/",
+        }
+        try:
+            resp = await session.get(url, headers=headers, allow_redirects=False)
+            if resp.status_code == 200:
+                data = _json.loads(resp.text)
+                count = (
+                    data.get("graphql", {}).get("hashtag", {}).get("edge_hashtag_to_media", {}).get("count")
+                    or data.get("data", {}).get("hashtag", {}).get("media_count")
+                    or 0
+                )
+                return {"media_count": int(count)}
+        except Exception:
+            pass
+        return {"media_count": 0}
+
+    # ── Caption Analysis ──────────────────────────────────────────────────────
+
+    async def caption_analyze(
+        self,
+        username: str,
+        max_posts: int = 20,
+    ) -> Dict[str, Any]:
+        """
+        Analyze caption patterns from an account's top posts.
+
+        Extracts: average caption length, emoji usage rate, hashtag count distribution,
+        CTA presence (link in bio / follow / comment / swipe), posting cadence patterns.
+
+        Returns:
+            dict with pattern summary and top-performing post examples.
+        """
+        import re as _re
+        import statistics
+
+        user = await self.fetch_user(username)
+        if not user:
+            raise FetchError(f"caption_analyze: user @{username} not found")
+
+        if user.get("is_private"):
+            raise FetchError(
+                f"caption_analyze: @{username} is a private account — captions are not accessible"
+            )
+
+        timeline = user.get("edge_owner_to_timeline_media") or {}
+        initial_edges = timeline.get("edges") or []
+        page_info = timeline.get("page_info") or {}
+        has_next = page_info.get("has_next_page", False)
+        end_cursor = page_info.get("end_cursor") or ""
+
+        # Use posts already embedded in fetch_user response as the first batch
+        posts = [e.get("node", e) for e in initial_edges]
+
+        # Fetch more pages if max_posts > initial count and next page exists
+        if len(posts) < max_posts and has_next and end_cursor:
+            user_id = user.get("id") or user.get("pk") or ""
+            remaining = max_posts - len(posts)
+            feed_data = await self.fetch_user_feed(
+                user_id, username, end_cursor, max_posts=remaining
+            )
+            extra_edges = feed_data.get("edges") or []
+            posts.extend(e.get("node", e) for e in extra_edges)
+
+        posts = posts[:max_posts]
+        if not posts:
+            raise FetchError(f"caption_analyze: no posts found for @{username}")
+
+        def _extract_caption(node: Dict) -> str:
+            # GraphQL nodes: edge_media_to_caption.edges[0].node.text
+            cap_edges = (node.get("edge_media_to_caption") or {}).get("edges") or []
+            if cap_edges:
+                return (cap_edges[0].get("node") or {}).get("text") or ""
+            # Direct caption field (some API responses)
+            cap = node.get("caption")
+            if isinstance(cap, dict):
+                return cap.get("text") or ""
+            return cap or ""
+
+        captions = [_extract_caption(p) for p in posts]
+        likes = [
+            p.get("like_count")
+            or (p.get("edge_liked_by") or {}).get("count")
+            or (p.get("edge_media_preview_like") or {}).get("count")
+            or 0
+            for p in posts
+        ]
+
+        emoji_re = _re.compile(
+            "[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF"
+            "\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF"
+            "\U00002600-\U000027BF\U0001FA00-\U0001FA9F]+",
+            flags=_re.UNICODE,
+        )
+        cta_patterns = _re.compile(
+            r"\b(link in bio|follow|comment below|tag a friend|swipe|dm me|click|shop now|save this)\b",
+            _re.IGNORECASE,
+        )
+
+        lengths, hashtag_counts, has_emoji, has_cta = [], [], [], []
+        for cap in captions:
+            lengths.append(len(cap))
+            hashtag_counts.append(len(_re.findall(r"#\w+", cap)))
+            has_emoji.append(1 if emoji_re.search(cap) else 0)
+            has_cta.append(1 if cta_patterns.search(cap) else 0)
+
+        avg_length = statistics.mean(lengths) if lengths else 0
+        avg_hashtags = statistics.mean(hashtag_counts) if hashtag_counts else 0
+        emoji_rate = sum(has_emoji) / len(has_emoji) if has_emoji else 0
+        cta_rate = sum(has_cta) / len(has_cta) if has_cta else 0
+
+        # Top 3 posts by likes
+        top_posts = sorted(
+            [{"caption": c[:200], "like_count": l} for c, l in zip(captions, likes)],
+            key=lambda x: -x["like_count"],
+        )[:3]
+
+        # Most common hashtags across all posts
+        all_tags: Dict[str, int] = {}
+        for cap in captions:
+            for tag in _re.findall(r"#(\w+)", cap):
+                all_tags[tag.lower()] = all_tags.get(tag.lower(), 0) + 1
+        top_hashtags = sorted(all_tags.items(), key=lambda x: -x[1])[:10]
+
+        return {
+            "username": username,
+            "posts_analyzed": len(posts),
+            "avg_caption_length": round(avg_length),
+            "avg_hashtag_count": round(avg_hashtags, 1),
+            "emoji_usage_rate": round(emoji_rate * 100),
+            "cta_usage_rate": round(cta_rate * 100),
+            "top_hashtags": [{"tag": t, "count": c} for t, c in top_hashtags],
+            "top_posts_by_likes": top_posts,
+            "insights": _caption_insights(avg_length, avg_hashtags, emoji_rate, cta_rate),
+        }
+
+
+def _caption_insights(length: float, hashtags: float, emoji_rate: float, cta_rate: float) -> List[str]:
+    tips = []
+    if length < 50:
+        tips.append("Captions are very short — try 100-150 chars for more context and discoverability")
+    elif length > 500:
+        tips.append("Captions are long — consider breaking them up with line breaks for readability")
+    if hashtags < 5:
+        tips.append("Low hashtag count — using 10-15 targeted hashtags improves reach")
+    elif hashtags > 25:
+        tips.append("High hashtag count — reduce to 10-20 relevant hashtags for better quality signal")
+    if emoji_rate < 0.3:
+        tips.append("Low emoji usage — emojis in captions increase engagement rate by ~15%")
+    if cta_rate < 0.2:
+        tips.append("Low CTA usage — adding a call-to-action (e.g. 'comment below') doubles comments")
+    if not tips:
+        tips.append("Caption strategy looks solid — good length, hashtags, and engagement signals")
+    return tips

@@ -121,6 +121,8 @@ from .models import (
     FollowingInput,
     HashtagDeepInput,
     HashtagInput,
+    HashtagSuggestInput,
+    CaptionAnalyzeInput,
     HighlightsInput,
     LocationPostsInput,
     NicheTopInput,
@@ -2715,6 +2717,136 @@ def register_tools(
             return out
 
     # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_hashtag_suggest
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("analysis"):
+
+        @mcp.tool(
+            name="instagram_hashtag_suggest",
+            annotations={
+                "title": "Instagram Hashtag Suggestions",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
+        async def instagram_hashtag_suggest(params: HashtagSuggestInput, ctx: Context) -> str:
+            """
+            🌐 NO LOGIN REQUIRED — Suggest related hashtags for a niche.
+
+            Analyzes top posts under the seed hashtag, extracts hashtags they use,
+            ranks by frequency, and groups them into tiers by post volume:
+            - Mega (10M+ posts) — maximum reach, very competitive
+            - Macro (1M–10M) — broad reach, moderate competition
+            - Mid (100K–1M) — good balance of reach and discoverability
+            - Micro (<100K) — niche, highly targeted, less competition
+
+            Returns a balanced set optimized for discoverability and a copy-paste block.
+
+            Args:
+                seed_hashtag: Starting hashtag (e.g. "fitness" or "#fitness")
+                target_count: How many hashtags to return (5–50, default 30)
+
+            Returns:
+                Tiered hashtag suggestions with copy-paste block.
+            """
+            await ctx.info(f"instagram_hashtag_suggest: #{params.seed_hashtag} count={params.target_count}")
+            try:
+                data = await client.hashtag_suggest(params.seed_hashtag, params.target_count)
+                lines = [
+                    f"**Hashtag Suggestions for #{data['seed']}**",
+                    f"Analyzed {data['posts_analyzed']} top posts, found {data['unique_hashtags_found']} unique hashtags",
+                    "",
+                ]
+                tiers = data["tiers"]
+                if tiers["mega_10M_plus"]:
+                    lines.append(f"**Mega (10M+ posts):** " + " ".join(f"#{t}" for t in tiers["mega_10M_plus"]))
+                if tiers["macro_1M_10M"]:
+                    lines.append(f"**Macro (1M–10M):** " + " ".join(f"#{t}" for t in tiers["macro_1M_10M"]))
+                if tiers["mid_100k_1M"]:
+                    lines.append(f"**Mid (100K–1M):** " + " ".join(f"#{t}" for t in tiers["mid_100k_1M"]))
+                if tiers["micro_under_100k"]:
+                    lines.append(f"**Micro (<100K):** " + " ".join(f"#{t}" for t in tiers["micro_under_100k"]))
+                lines += [
+                    "",
+                    f"**Copy-paste ({len(data['balanced_set'])} hashtags):**",
+                    data["copy_paste"],
+                ]
+                return "\n".join(lines)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_caption_analyze
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("analysis"):
+
+        @mcp.tool(
+            name="instagram_caption_analyze",
+            annotations={
+                "title": "Instagram Caption Analyzer",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
+        async def instagram_caption_analyze(params: CaptionAnalyzeInput, ctx: Context) -> str:
+            """
+            🌐 NO LOGIN REQUIRED — Analyze caption patterns of an Instagram account.
+
+            Fetches recent posts and extracts:
+            - Average caption length
+            - Hashtag count distribution
+            - Emoji usage rate
+            - CTA (call-to-action) presence rate
+            - Most-used hashtags
+            - Top 3 posts by likes with caption excerpts
+            - Actionable improvement tips
+
+            Args:
+                username: Instagram username to analyze
+                max_posts: Number of recent posts to analyze (5–50, default 20)
+
+            Returns:
+                Caption pattern analysis with insights and top-performing examples.
+            """
+            await ctx.info(f"instagram_caption_analyze: @{params.username} posts={params.max_posts}")
+            try:
+                data = await client.caption_analyze(params.username, params.max_posts)
+                lines = [
+                    f"**Caption Analysis — @{data['username']}**",
+                    f"Analyzed {data['posts_analyzed']} posts",
+                    "",
+                    f"📏 Avg caption length: **{data['avg_caption_length']} chars**",
+                    f"#️⃣ Avg hashtags per post: **{data['avg_hashtag_count']}**",
+                    f"😀 Emoji usage: **{data['emoji_usage_rate']}%** of posts",
+                    f"📣 CTA usage: **{data['cta_usage_rate']}%** of posts",
+                ]
+                if data["top_hashtags"]:
+                    lines.append("")
+                    lines.append("**Most-used hashtags:**")
+                    for h in data["top_hashtags"][:8]:
+                        lines.append(f"  #{h['tag']} ({h['count']}x)")
+                if data["top_posts_by_likes"]:
+                    lines.append("")
+                    lines.append("**Top posts by likes:**")
+                    for i, p in enumerate(data["top_posts_by_likes"], 1):
+                        cap = p["caption"].replace("\n", " ")[:120]
+                        lines.append(f"  {i}. ❤️ {p['like_count']:,} — \"{cap}\"")
+                if data["insights"]:
+                    lines.append("")
+                    lines.append("**Insights:**")
+                    for tip in data["insights"]:
+                        lines.append(f"  • {tip}")
+                return "\n".join(lines)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
     # TOOL 22: instagram_similar_accounts
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -3852,7 +3984,7 @@ def register_tools(
     # TOOL: instagram_delete_comment
     # ─────────────────────────────────────────────────────────────────────────
 
-    if _enabled("social"):
+    if _enabled("social", requires_auth=True):
 
         @mcp.tool(
             name="instagram_delete_comment",
@@ -3888,7 +4020,7 @@ def register_tools(
     # TOOL: instagram_publish_story
     # ─────────────────────────────────────────────────────────────────────────
 
-    if _enabled("social"):
+    if _enabled("social", requires_auth=True):
 
         @mcp.tool(
             name="instagram_publish_story",
@@ -3927,7 +4059,7 @@ def register_tools(
     # TOOL: instagram_broadcast_channel
     # ─────────────────────────────────────────────────────────────────────────
 
-    if _enabled("social"):
+    if _enabled("social", requires_auth=True):
 
         @mcp.tool(
             name="instagram_broadcast_channel",

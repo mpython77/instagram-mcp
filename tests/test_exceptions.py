@@ -1,6 +1,7 @@
 import pytest
 from instagram_mcp.exceptions import (
     InstagramMCPError,
+    AuthError,
     UserNotFoundError,
     PostNotFoundError,
     RateLimitError,
@@ -97,4 +98,11 @@ def test_mask_proxy_url():
     
     # To cover exception block
     assert _mask_proxy_url(123) == "<proxy>"
+
+
+def test_auth_error():
+    err = AuthError()
+    assert err.error_type == "auth_required"
+    assert "cookies.json" in err.suggested_action
+    assert isinstance(err, InstagramMCPError)
 
