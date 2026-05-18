@@ -284,22 +284,6 @@ def test_publish_story_input():
     assert p2.close_friends_only is True
 
 
-def test_notes_create_input():
-    from instagram_mcp.models import NotesCreateInput
-    n = NotesCreateInput(text="hello world")
-    assert n.text == "hello world"
-    assert n.audience == 0
-
-    n2 = NotesCreateInput(text="close", audience=1)
-    assert n2.audience == 1
-
-
-def test_notes_delete_input():
-    from instagram_mcp.models import NotesDeleteInput
-    d = NotesDeleteInput(note_id="12345")
-    assert d.note_id == "12345"
-
-
 def test_broadcast_channel_input():
     from instagram_mcp.models import BroadcastChannelInput
     b = BroadcastChannelInput(channel_id="abc123")

@@ -4865,9 +4865,8 @@ class InstagramClient:
             "origin": "https://www.instagram.com",
             "Cookie": self._cookie_str(),
         }
-        # i.instagram.com accepts the session for friendships endpoints
         resp = await session.post(
-            f"https://i.instagram.com/api/v1/friendships/{endpoint}/{user_id}/",
+            f"https://www.instagram.com/api/v1/friendships/{endpoint}/{user_id}/",
             data={"user_id": user_id},
             headers=headers,
             allow_redirects=False,
@@ -4893,136 +4892,6 @@ class InstagramClient:
             "is_private": bool(fs.get("is_private")),
             "outgoing_request": bool(fs.get("outgoing_request")),
         }
-
-    # ── Instagram Notes ───────────────────────────────────────────────────────
-
-    async def _notes_headers(self) -> Tuple[Any, Dict[str, str]]:
-        """Return (session, headers) for Notes API calls."""
-        cm = self._cookie_manager
-        if not cm or not getattr(cm, "is_authenticated", False):
-            raise FetchError("Notes tools require authentication.")
-        session = await self._get_auth_session()
-        csrf = (cm.cookies.get("csrftoken", "")) or ""
-        headers = {
-            "x-csrftoken": csrf,
-            "x-ig-app-id": self._config.ig_app_id,
-            "content-type": "application/x-www-form-urlencoded",
-            "accept": "application/json, */*",
-            "referer": "https://www.instagram.com/",
-            "origin": "https://www.instagram.com",
-            "Cookie": self._cookie_str(),
-        }
-        return session, headers
-
-    async def notes_create(self, text: str, audience: int = 0) -> Dict[str, Any]:
-        """
-        Create an Instagram Note (visible for 24 h).
-
-        Args:
-            text: Note text (max 60 chars).
-            audience: 0 = followers, 1 = close friends.
-
-        Returns:
-            dict with note_id, text, audience, expires_at.
-        """
-        if len(text) > 60:
-            raise FetchError("Note text must be 60 characters or less.")
-        session, headers = await self._notes_headers()
-        resp = await session.post(
-            "https://i.instagram.com/api/v1/notes/create_note/",
-            data={
-                "text": text,
-                "audience": str(audience),
-            },
-            headers=headers,
-            allow_redirects=False,
-        )
-        if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError("notes_create: redirected — session rate-limited or not logged in")
-        body_text = resp.text
-        if resp.status_code not in (200, 201):
-            raise FetchError(f"notes_create: HTTP {resp.status_code}: {body_text[:200]}")
-        if body_text.lstrip().startswith("<"):
-            raise FetchError(f"notes_create: got HTML (session blocked): {body_text[:150]}")
-        try:
-            body = _json.loads(body_text)
-        except Exception:
-            raise FetchError(f"notes_create: invalid JSON: {body_text[:200]}")
-        if body.get("status") == "fail":
-            raise FetchError(f"notes_create: API error: {body.get('message', 'unknown')}")
-        note = body.get("note") or {}
-        return {
-            "note_id": str(note.get("id", "")),
-            "text": note.get("text", text),
-            "audience": note.get("audience", audience),
-            "expires_at": note.get("expires_at"),
-        }
-
-    async def notes_get(self) -> List[Dict[str, Any]]:
-        """
-        Get your active Instagram Notes.
-
-        Returns:
-            List of note dicts (note_id, text, audience, expires_at, username).
-        """
-        session, headers = await self._notes_headers()
-        get_headers = {k: v for k, v in headers.items() if k != "content-type"}
-        resp = await session.get(
-            "https://i.instagram.com/api/v1/notes/get_notes/",
-            headers=get_headers,
-            allow_redirects=False,
-        )
-        if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError("notes_get: redirected — session rate-limited or not logged in")
-        body_text = resp.text
-        if resp.status_code not in (200, 201):
-            raise FetchError(f"notes_get: HTTP {resp.status_code}: {body_text[:200]}")
-        if body_text.lstrip().startswith("<"):
-            raise FetchError(f"notes_get: got HTML (session blocked): {body_text[:150]}")
-        try:
-            body = _json.loads(body_text)
-        except Exception:
-            raise FetchError(f"notes_get: invalid JSON: {body_text[:200]}")
-        notes_raw = body.get("notes") or []
-        result = []
-        for n in notes_raw:
-            result.append({
-                "note_id": str(n.get("id", "")),
-                "text": n.get("text", ""),
-                "audience": n.get("audience", 0),
-                "expires_at": n.get("expires_at"),
-                "username": (n.get("user") or {}).get("username", ""),
-            })
-        return result
-
-    async def notes_delete(self, note_id: str) -> Dict[str, Any]:
-        """
-        Delete an Instagram Note by ID.
-
-        Returns:
-            dict with status='deleted', note_id.
-        """
-        session, headers = await self._notes_headers()
-        resp = await session.post(
-            f"https://i.instagram.com/api/v1/notes/delete_note/",
-            data={"note_id": note_id},
-            headers=headers,
-            allow_redirects=False,
-        )
-        if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError("notes_delete: redirected — session rate-limited or not logged in")
-        body_text = resp.text
-        if resp.status_code not in (200, 201):
-            raise FetchError(f"notes_delete: HTTP {resp.status_code}: {body_text[:200]}")
-        if body_text.lstrip().startswith("<"):
-            raise FetchError(f"notes_delete: got HTML (session blocked): {body_text[:150]}")
-        try:
-            body = _json.loads(body_text)
-        except Exception:
-            raise FetchError(f"notes_delete: invalid JSON: {body_text[:200]}")
-        if body.get("status") == "fail":
-            raise FetchError(f"notes_delete: API error: {body.get('message', 'unknown')}")
-        return {"status": "deleted", "note_id": note_id}
 
     # ── Broadcast Channels ────────────────────────────────────────────────────
 
@@ -5153,63 +5022,72 @@ class InstagramClient:
         """
         Get a Threads profile by username (public, no auth required).
 
-        Fetches follower count, bio, verification status and recent thread count.
+        Scrapes the Threads profile page HTML which contains embedded JSON.
+        More reliable than the GraphQL API (whose doc_ids rotate frequently).
 
         Returns:
             dict with username, display_name, bio, followers, is_verified, threads_count.
         """
+        import re as _re
+
         username = username.lstrip("@").strip().lower()
         if not username:
             raise FetchError("threads_profile: username is required")
 
-        session = await self._get_session()
-        # Threads public GraphQL profile lookup
+        session = await self._get_session(None)
         resp = await session.get(
-            "https://www.threads.net/api/graphql",
-            params={
-                "lsd": "AVqbxe3J_YA",
-                "variables": _json.dumps({"userID": "", "username": username, "__relay_internal__pv__BarcelonaIsLoggedInrelayprovider": False}),
-                "doc_id": "25025320444985689",
-            },
+            f"https://www.threads.net/@{username}",
             headers=self._threads_headers({
-                "x-fb-lsd": "AVqbxe3J_YA",
-                "x-fb-friendly-name": "BarcelonaProfileRootQuery",
-                "content-type": "application/x-www-form-urlencoded",
+                "Accept": "text/html,application/xhtml+xml,*/*",
+                "Referer": "https://www.threads.net/",
             }),
-            allow_redirects=False,
+            allow_redirects=True,
         )
-        if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError("threads_profile: redirected — possibly rate-limited")
+        if resp.status_code == 404:
+            raise FetchError(f"threads_profile: user '{username}' not found")
         if resp.status_code != 200:
             raise FetchError(f"threads_profile: HTTP {resp.status_code}")
-        body_text = resp.text
-        if body_text.lstrip().startswith("<"):
-            raise FetchError("threads_profile: got HTML response")
-        try:
-            body = _json.loads(body_text)
-        except Exception:
-            raise FetchError(f"threads_profile: invalid JSON: {body_text[:200]}")
 
-        # Navigate response tree
-        user_data = (
-            (body.get("data") or {}).get("userData") or
-            (body.get("data") or {}).get("user") or {}
-        )
-        u = user_data.get("user") or user_data
-        if not u:
-            raise FetchError(f"threads_profile: user '{username}' not found")
+        html = resp.text
+        if not html or len(html) < 500:
+            raise FetchError("threads_profile: empty or too-short response")
+
+        # Extract embedded JSON fields from the Threads page
+        def _extract(pattern: str, default: Any = "") -> Any:
+            m = _re.search(pattern, html)
+            return m.group(1) if m else default
+
+        # pk is right before username in the JSON
+        pk = _extract(r'"pk":"(\d+)","username":"' + _re.escape(username) + '"', "")
+        if not pk:
+            # Try reverse: find username then look back for pk
+            m_pk = _re.search(
+                r'"has_onboarded_to_text_post_app":[^,]+,"pk":"(\d+)",[^,]*"username":"' + _re.escape(username) + '"',
+                html
+            )
+            pk = m_pk.group(1) if m_pk else ""
+
+        followers = int(_extract(r'"username":"' + _re.escape(username) + r'"[^}]{0,300}"follower_count":(\d+)', 0))
+        if not followers:
+            followers = int(_extract(r'"follower_count":(\d+)', 0))
+
+        is_private = _extract(r'"text_post_app_is_private":(true|false)', "false") == "true"
+        is_verified = _extract(r'"is_verified":(true|false)', "false") == "true"
+
+        if not followers and not pk:
+            raise FetchError(f"threads_profile: could not extract profile data for '{username}'")
 
         return {
-            "username": u.get("username", username),
-            "display_name": u.get("full_name", ""),
-            "bio": u.get("biography", ""),
-            "followers": u.get("follower_count", 0),
-            "following": u.get("following_count", 0),
-            "threads_count": u.get("media_count", 0),
-            "is_verified": bool(u.get("is_verified")),
-            "is_private": bool(u.get("is_private")),
-            "profile_pic_url": u.get("profile_pic_url", ""),
-            "pk": str(u.get("pk", u.get("id", ""))),
+            "username": username,
+            "display_name": "",
+            "bio": "",
+            "followers": followers,
+            "following": 0,
+            "threads_count": 0,
+            "is_verified": is_verified,
+            "is_private": is_private,
+            "profile_pic_url": "",
+            "pk": pk,
         }
 
     async def threads_user_posts(
@@ -5223,69 +5101,51 @@ class InstagramClient:
         """
         profile = await self.threads_profile(username)
         user_id = profile.get("pk", "")
-        if not user_id:
-            raise FetchError(f"threads_user_posts: could not resolve user ID for '{username}'")
+        # We already have the HTML from threads_profile — fetch it again for posts
+        import re as _re
 
-        session = await self._get_session()
-        params: Dict[str, Any] = {
-            "lsd": "AVqbxe3J_YA",
-            "variables": _json.dumps({
-                "userID": user_id,
-                "count": 20,
-                "after": max_id or None,
-                "__relay_internal__pv__BarcelonaIsLoggedInrelayprovider": False,
-            }),
-            "doc_id": "7357985970980374",
-        }
+        session = await self._get_session(None)
         resp = await session.get(
-            "https://www.threads.net/api/graphql",
-            params=params,
+            f"https://www.threads.net/@{username}",
             headers=self._threads_headers({
-                "x-fb-lsd": "AVqbxe3J_YA",
-                "x-fb-friendly-name": "BarcelonaProfileThreadsTabQuery",
+                "Accept": "text/html,application/xhtml+xml,*/*",
+                "Referer": "https://www.threads.net/",
             }),
-            allow_redirects=False,
+            allow_redirects=True,
         )
-        if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError("threads_user_posts: redirected")
+        if resp.status_code == 404:
+            raise FetchError(f"threads_user_posts: user '{username}' not found")
         if resp.status_code != 200:
             raise FetchError(f"threads_user_posts: HTTP {resp.status_code}")
-        body_text = resp.text
-        if body_text.lstrip().startswith("<"):
-            raise FetchError("threads_user_posts: got HTML")
-        try:
-            body = _json.loads(body_text)
-        except Exception:
-            raise FetchError(f"threads_user_posts: invalid JSON: {body_text[:200]}")
 
-        edges = (
-            ((body.get("data") or {}).get("mediaData") or {}).get("edges") or
-            ((body.get("data") or {}).get("user") or {}).get("threads", {}).get("edges") or
-            []
-        )
+        html = resp.text
+        # Extract post shortcodes (Threads uses Instagram shortcode format)
+        codes = _re.findall(r'"code":"([A-Za-z0-9_-]{10,12})"', html)
+        like_counts = [int(x) for x in _re.findall(r'"like_count":(\d+)', html)]
+        texts = _re.findall(r'"text":"([^"]{1,500})"', html)
+        taken_ats = [int(x) for x in _re.findall(r'"taken_at":(\d+)', html)]
+
         posts = []
-        for edge in edges:
-            node = edge.get("node") or {}
-            thread_items = node.get("thread_items") or []
-            for item in thread_items:
-                post = item.get("post") or {}
-                caption = (post.get("caption") or {}).get("text", "")
-                posts.append({
-                    "post_id": str(post.get("pk", post.get("id", ""))),
-                    "text": caption,
-                    "like_count": post.get("like_count", 0),
-                    "reply_count": post.get("text_post_app_info", {}).get("direct_reply_count", 0),
-                    "taken_at": post.get("taken_at"),
-                    "shortcode": post.get("code", ""),
-                })
-        page_info = (
-            ((body.get("data") or {}).get("mediaData") or {}).get("page_info") or
-            ((body.get("data") or {}).get("user") or {}).get("threads", {}).get("page_info") or
-            {}
-        )
+        seen_codes: set = set()
+        for i, code in enumerate(codes):
+            if code in seen_codes:
+                continue
+            seen_codes.add(code)
+            posts.append({
+                "post_id": "",
+                "shortcode": code,
+                "text": texts[i] if i < len(texts) else "",
+                "like_count": like_counts[i] if i < len(like_counts) else 0,
+                "reply_count": 0,
+                "taken_at": taken_ats[i] if i < len(taken_ats) else None,
+                "url": f"https://www.threads.net/@{username}/post/{code}",
+            })
+            if len(posts) >= 20:
+                break
+
         return {
             "username": username,
             "posts": posts,
-            "next_max_id": page_info.get("end_cursor"),
-            "has_more": bool(page_info.get("has_next_page")),
+            "next_max_id": None,
+            "has_more": False,
         }

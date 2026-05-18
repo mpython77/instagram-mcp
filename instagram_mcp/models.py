@@ -1783,26 +1783,6 @@ class PublishStoryInput(BaseModel):
     close_friends_only: bool = Field(default=False, description="If True, publish to Close Friends list only.")
 
 
-# ── Notes ─────────────────────────────────────────────────────────────────────
-
-class NotesCreateInput(BaseModel):
-    """Input for instagram_notes_create tool."""
-    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
-
-    text: str = Field(..., description="Note text (max 60 characters).", min_length=1, max_length=60)
-    audience: int = Field(
-        default=0,
-        description="Audience: 0 = followers you follow back, 1 = close friends.",
-    )
-
-
-class NotesDeleteInput(BaseModel):
-    """Input for instagram_notes_delete tool."""
-    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
-
-    note_id: str = Field(..., description="Note ID to delete (from instagram_notes_get).", min_length=1)
-
-
 # ── Broadcast Channels ────────────────────────────────────────────────────────
 
 class BroadcastChannelInput(BaseModel):

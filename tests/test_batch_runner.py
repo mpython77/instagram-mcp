@@ -272,12 +272,12 @@ async def test_run_main(mock_save, mock_load_res, mock_load_prog, mock_load_targ
     cfg = BatchConfig(targets_file="t.txt", output_file="o.json", save_every=2)
     client = AsyncMock()
     runner = BatchRunner(cfg, client)
-    
+
     mock_load_targets.return_value = ["user1", "user2", "user3", "user4", "user5", "user6"]
     mock_load_prog.return_value = {"user1"}
     mock_load_res.return_value = {"user1": {}}
-    
-    async def mock_scrape(u, sem):
+
+    async def mock_scrape(u):
         if u == "user2":
             return {"username": u, "status": "active"}
         if u == "user3":
@@ -289,8 +289,16 @@ async def test_run_main(mock_save, mock_load_res, mock_load_prog, mock_load_targ
         if u == "user6":
             return {"username": u, "status": "dead"}
         return {}
-    runner._scrape_one = AsyncMock(side_effect=mock_scrape)
-    
+
+    runner._scrape_one_no_semaphore = mock_scrape
+
+    async def noop_open(force=False): pass
+    async def noop_close(): pass
+    async def noop_write(r): pass
+    runner._open_jsonl_stream = noop_open
+    runner._close_jsonl_stream = noop_close
+    runner._jsonl_write = noop_write
+
     stats = await runner.run()
     assert stats.completed == 6
 

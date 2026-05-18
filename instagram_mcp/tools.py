@@ -153,8 +153,6 @@ from .models import (
     FollowUserInput,
     DeleteCommentInput,
     PublishStoryInput,
-    NotesCreateInput,
-    NotesDeleteInput,
     BroadcastChannelInput,
     ThreadsProfileInput,
     ThreadsPostsInput,
@@ -3922,116 +3920,6 @@ def register_tools(
                 audience = " (Close Friends only)" if params.close_friends_only else ""
                 media_id = data.get("media_id", "unknown")
                 return f"📖 Story published{audience}. media_id={media_id}"
-            except Exception as e:
-                raise _exception_to_tool_error(e)
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # TOOL: instagram_notes_create
-    # ─────────────────────────────────────────────────────────────────────────
-
-    if _enabled("social"):
-
-        @mcp.tool(
-            name="instagram_notes_create",
-            annotations={
-                "title": "Instagram Notes Create",
-                "readOnlyHint": False,
-                "destructiveHint": False,
-                "idempotentHint": False,
-                "openWorldHint": False,
-            },
-        )
-        async def instagram_notes_create(params: NotesCreateInput, ctx: Context) -> str:
-            """
-            🔐 AUTH REQUIRED — Create an Instagram Note (visible for 24 hours).
-
-            Notes appear at the top of your followers' DM inbox. Max 60 characters.
-            No competitor MCP has this feature.
-
-            Args:
-                text: Note text (max 60 chars)
-                audience: 0 = mutual followers, 1 = close friends
-
-            Returns:
-                Confirmation with note_id and text.
-            """
-            await ctx.info(f"instagram_notes_create: text={params.text!r} audience={params.audience}")
-            try:
-                data = await client.notes_create(params.text, params.audience)
-                aud = "close friends" if params.audience == 1 else "mutual followers"
-                return f"📝 Note created (ID: {data['note_id']}) for {aud}: \"{data['text']}\""
-            except Exception as e:
-                raise _exception_to_tool_error(e)
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # TOOL: instagram_notes_get
-    # ─────────────────────────────────────────────────────────────────────────
-
-    if _enabled("social"):
-
-        @mcp.tool(
-            name="instagram_notes_get",
-            annotations={
-                "title": "Instagram Notes Get",
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False,
-            },
-        )
-        async def instagram_notes_get(ctx: Context) -> str:
-            """
-            🔐 AUTH REQUIRED — Get your active Instagram Notes.
-
-            Returns all currently active notes on your account (each lasts 24 hours).
-            Includes note_id needed for instagram_notes_delete.
-
-            Returns:
-                List of active notes with ID, text, audience, and expiry time.
-            """
-            await ctx.info("instagram_notes_get")
-            try:
-                notes = await client.notes_get()
-                if not notes:
-                    return "No active notes found."
-                lines = [f"**Active Notes ({len(notes)}):**"]
-                for n in notes:
-                    aud = "close friends" if n.get("audience") == 1 else "mutual followers"
-                    lines.append(f"- ID: {n['note_id']} | \"{n['text']}\" | {aud}")
-                return "\n".join(lines)
-            except Exception as e:
-                raise _exception_to_tool_error(e)
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # TOOL: instagram_notes_delete
-    # ─────────────────────────────────────────────────────────────────────────
-
-    if _enabled("social"):
-
-        @mcp.tool(
-            name="instagram_notes_delete",
-            annotations={
-                "title": "Instagram Notes Delete",
-                "readOnlyHint": False,
-                "destructiveHint": True,
-                "idempotentHint": False,
-                "openWorldHint": False,
-            },
-        )
-        async def instagram_notes_delete(params: NotesDeleteInput, ctx: Context) -> str:
-            """
-            🔐 AUTH REQUIRED — Delete an Instagram Note.
-
-            Args:
-                note_id: Note ID to delete (from instagram_notes_get)
-
-            Returns:
-                Confirmation that the note was deleted.
-            """
-            await ctx.info(f"instagram_notes_delete: note_id={params.note_id}")
-            try:
-                data = await client.notes_delete(params.note_id)
-                return f"🗑️ Note {data['note_id']} deleted."
             except Exception as e:
                 raise _exception_to_tool_error(e)
 
