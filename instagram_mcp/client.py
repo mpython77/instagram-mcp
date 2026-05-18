@@ -182,12 +182,13 @@ class InstagramClient:
                 )
                 # Set each cookie with domain=".instagram.com" so libcurl sends them
                 # to ALL subdomains (www.instagram.com, i.instagram.com, etc.).
-                # Use raw values (no octal decode) — the raw rur works for API requests.
-                # The rur redirect-loop issue only affects homepage fetches, which now
-                # use an anonymous HTTP/1.1 session that doesn't need any cookies.
+                # Decode octal escapes in values (e.g. rur's \054 → comma) so that
+                # Instagram's routing layer receives the correct cookie values.
                 if cm and cm.cookies:
                     for name, value in cm.cookies.items():
-                        session.cookies.set(name, value, domain=".instagram.com")
+                        session.cookies.set(
+                            name, self._decode_cookie_value(value), domain=".instagram.com"
+                        )
                 self._auth_session = session
             return self._auth_session
 
@@ -204,16 +205,19 @@ class InstagramClient:
         return _re.sub(r'\x5c[0-9]{3}', lambda m: chr(int(m.group(0)[1:], 8)), value)
 
     def _cookie_str(self) -> str:
-        """Build a Cookie header string from raw cookie dict, preserving exact values.
+        """Build a Cookie header string with decoded octal escapes.
 
-        Passes cookies directly as a Cookie header to bypass curl_cffi's cookie jar,
-        which can mangle quoted values like rur. Uses decoded octal escapes so that
-        Instagram's routing layer receives the correct rur value (e.g. commas not \\054).
+        Cookie-Editor exports rur with octal sequences (e.g. \\054 for comma).
+        Sending raw \\054 in the Cookie header causes www.instagram.com to return
+        302 redirects to login for all API endpoints. Decoding first ensures the
+        routing layer receives the correct rur value (commas, not \\054 literals).
         """
         cm = self._cookie_manager
         if not cm:
             return ""
-        return "; ".join(f"{k}={v}" for k, v in cm.cookies.items())
+        return "; ".join(
+            f"{k}={self._decode_cookie_value(v)}" for k, v in cm.cookies.items()
+        )
 
     async def close(self) -> None:
         """Cleanly shut down the client — close all pooled sessions."""
@@ -3807,8 +3811,6 @@ class InstagramClient:
 
     async def send_dm_text(self, thread_id: str, text: str) -> Dict[str, Any]:
         """Send a text message via Instagram Web GraphQL (IGDirectTextSendMutation)."""
-        import re as _re
-
         cm = self._cookie_manager
         if not cm or not getattr(cm, "is_authenticated", False):
             raise FetchError("Send DM requires authentication. Set up cookies.txt.")
@@ -3817,104 +3819,133 @@ class InstagramClient:
         if len(text) > 1000:
             raise FetchError("Message too long (max 1000 chars).")
 
-        # Fetch live fb_dtsg + lsd from Instagram web page
-        fb_dtsg, lsd = await self._fetch_fb_tokens()
-
         csrf = (cm.cookies.get("csrftoken", "")) or ""
         ds_user_id = (cm.cookies.get("ds_user_id", "0")) or "0"
-        offline_id = str(int(time.time() * 1000) * (2 ** 22) + random.randint(0, (2 ** 22) - 1))
 
-        variables = {
-            "ig_thread_igid": thread_id,
-            "offline_threading_id": offline_id,
-            "recipient_igids": None,
-            "replied_to_client_context": None,
-            "replied_to_item_id": None,
-            "reply_to_message_id": None,
-            "sampled": None,
-            "text": {"sensitive_string_value": text},
-            "mentions": [],
-            "mentioned_user_ids": [],
-            "commands": None,
-            "forwarded_from_thread_id": None,
-            "is_forwarded_from_own_message": None,
-            "send_attribution": "igd_web_chat_tab:in_thread",
-        }
+        last_error = "unknown error"
+        for attempt in range(3):
+            if attempt > 0:
+                await asyncio.sleep(attempt * 4)
+                cm.invalidate_csrf_cache()
+                logger.debug("send_dm_text retry %d/3", attempt + 1)
 
-        data = {
-            "av": ds_user_id,
-            "__d": "www",
-            "__user": ds_user_id,
-            "__a": "1",
-            "__req": str(random.randint(10, 99)),
-            "dpr": "1",
-            "__ccg": "GOOD",
-            "fb_dtsg": fb_dtsg,
-            "jazoest": "2" + str(sum(ord(c) for c in fb_dtsg)),
-            "lsd": lsd,
-            "fb_api_caller_class": "RelayModern",
-            "fb_api_req_friendly_name": "IGDirectTextSendMutation",
-            "server_timestamps": "true",
-            "variables": _json.dumps(variables),
-            "doc_id": "26911679871773184",
-        }
+            try:
+                fb_dtsg, lsd = await self._fetch_fb_tokens()
+            except Exception as exc:
+                last_error = str(exc)
+                logger.warning("send_dm_text: token fetch failed (attempt %d): %s", attempt + 1, exc)
+                continue
 
-        session = await self._get_auth_session()
-        resp = await session.post(
-            "https://www.instagram.com/api/graphql",
-            data=data,
-            headers={
-                "x-csrftoken": csrf,
-                "x-fb-friendly-name": "IGDirectTextSendMutation",
-                "x-fb-lsd": lsd,
-                "x-ig-app-id": self._config.ig_app_id,
-                "x-ig-www-claim": "0",
-                "x-asbd-id": "129477",
-                "x-instagram-ajax": "1",
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Referer": f"https://www.instagram.com/direct/t/{thread_id}/",
-                "Origin": "https://www.instagram.com",
-                "Sec-Fetch-Dest": "empty",
-                "Sec-Fetch-Mode": "cors",
-                "Sec-Fetch-Site": "same-origin",
-            },
-            allow_redirects=False,
-        )
+            offline_id = str(int(time.time() * 1000) * (2 ** 22) + random.randint(0, (2 ** 22) - 1))
+            variables = {
+                "ig_thread_igid": thread_id,
+                "offline_threading_id": offline_id,
+                "recipient_igids": None,
+                "replied_to_client_context": None,
+                "replied_to_item_id": None,
+                "reply_to_message_id": None,
+                "sampled": None,
+                "text": {"sensitive_string_value": text},
+                "mentions": [],
+                "mentioned_user_ids": [],
+                "commands": None,
+                "forwarded_from_thread_id": None,
+                "is_forwarded_from_own_message": None,
+                "send_attribution": "igd_web_chat_tab:in_thread",
+            }
+            data = {
+                "av": ds_user_id,
+                "__d": "www",
+                "__user": ds_user_id,
+                "__a": "1",
+                "__req": str(random.randint(10, 99)),
+                "dpr": "1",
+                "__ccg": "GOOD",
+                "fb_dtsg": fb_dtsg,
+                "jazoest": "2" + str(sum(ord(c) for c in fb_dtsg)),
+                "lsd": lsd,
+                "fb_api_caller_class": "RelayModern",
+                "fb_api_req_friendly_name": "IGDirectTextSendMutation",
+                "server_timestamps": "true",
+                "variables": _json.dumps(variables),
+                "doc_id": "26911679871773184",
+            }
 
-        body_text = resp.text
-        if body_text.startswith("for (;;);"):
-            body_text = body_text[9:]
-
-        if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError("Send DM: GraphQL redirected (session rate-limited). Re-export cookies.")
-        if resp.status_code in (401, 403):
-            raise FetchError("Send DM: session expired. Re-export cookies.")
-        if resp.status_code != 200:
-            raise FetchError(f"Send DM: HTTP {resp.status_code}")
-
-        try:
-            body = _json.loads(body_text)
-        except Exception:
-            raise FetchError(f"Send DM: invalid JSON response: {body_text[:200]}")
-
-        if "error" in body:
-            raise FetchError(
-                f"Send DM failed: {body.get('errorSummary', body.get('error', 'unknown'))}"
+            session = await self._get_auth_session()
+            resp = await session.post(
+                "https://www.instagram.com/api/graphql",
+                data=data,
+                headers={
+                    "x-csrftoken": csrf,
+                    "x-fb-friendly-name": "IGDirectTextSendMutation",
+                    "x-fb-lsd": lsd,
+                    "x-ig-app-id": self._config.ig_app_id,
+                    "x-ig-www-claim": "0",
+                    "x-asbd-id": "129477",
+                    "x-instagram-ajax": "1",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Referer": f"https://www.instagram.com/direct/t/{thread_id}/",
+                    "Origin": "https://www.instagram.com",
+                    "Sec-Fetch-Dest": "empty",
+                    "Sec-Fetch-Mode": "cors",
+                    "Sec-Fetch-Site": "same-origin",
+                },
+                allow_redirects=False,
             )
 
-        inner = ((body.get("data") or {}).get(
-            "xig_direct_text_send_with_slide_messaging_response"
-        ) or {})
-        msg_id = inner.get("message_id", "")
-        if not msg_id:
-            raise FetchError(f"Send DM: no message_id in response: {body_text[:300]}")
+            body_text = resp.text
+            if body_text.startswith("for (;;);"):
+                body_text = body_text[9:]
 
-        return {
-            "status": "sent",
-            "item_id": msg_id,
-            "timestamp": int(inner.get("timestamp_ms", 0)),
-            "thread_id": thread_id,
-        }
+            if resp.status_code in (301, 302, 303, 307, 308):
+                last_error = "GraphQL redirected (session rate-limited)"
+                cm.invalidate_csrf_cache()
+                continue
+            if resp.status_code in (401, 403):
+                raise FetchError("Send DM: session expired. Re-export cookies.")
+            if resp.status_code != 200:
+                last_error = f"HTTP {resp.status_code}"
+                continue
+
+            try:
+                body = _json.loads(body_text)
+            except Exception:
+                last_error = f"invalid JSON: {body_text[:200]}"
+                continue
+
+            # Instagram bot-detection: session flagged — invalidate tokens and retry
+            if "1357001" in body_text or '"not-logged-in"' in body_text:
+                last_error = "session flagged by Instagram (error 1357001)"
+                cm.invalidate_csrf_cache()
+                logger.warning("send_dm_text: error 1357001 on attempt %d, retrying", attempt + 1)
+                continue
+
+            if "error" in body:
+                err_val = body.get("error")
+                err_code = err_val.get("code") if isinstance(err_val, dict) else None
+                if err_code == 1357001:
+                    last_error = "session flagged (1357001)"
+                    cm.invalidate_csrf_cache()
+                    continue
+                raise FetchError(
+                    f"Send DM failed: {body.get('errorSummary', err_val)}"
+                )
+
+            inner = ((body.get("data") or {}).get(
+                "xig_direct_text_send_with_slide_messaging_response"
+            ) or {})
+            msg_id = inner.get("message_id", "")
+            if not msg_id:
+                raise FetchError(f"Send DM: no message_id in response: {body_text[:300]}")
+
+            return {
+                "status": "sent",
+                "item_id": msg_id,
+                "timestamp": int(inner.get("timestamp_ms", 0)),
+                "thread_id": thread_id,
+            }
+
+        raise FetchError(f"Send DM failed after 3 attempts: {last_error}")
 
     async def send_dm_to_username(self, username: str, text: str) -> Dict[str, Any]:
         """Resolve username → thread igid, then send DM via GraphQL."""
@@ -3975,17 +4006,50 @@ class InstagramClient:
         except Exception:
             raise FetchError(f"{friendly_name}: invalid JSON: {body[:200]}")
 
+    async def _gql_mutation_with_retry(
+        self,
+        doc_id: str,
+        variables: Dict[str, Any],
+        friendly_name: str,
+    ) -> Dict[str, Any]:
+        """Fetch CSRF tokens and run a GraphQL mutation, retrying on session-flagged errors."""
+        cm = self._cookie_manager
+        last_error = "unknown"
+        for attempt in range(3):
+            if attempt > 0:
+                await asyncio.sleep(attempt * 4)
+                cm.invalidate_csrf_cache()
+                logger.debug("%s retry %d/3", friendly_name, attempt + 1)
+            try:
+                fb_dtsg, lsd = await self._fetch_fb_tokens()
+            except Exception as exc:
+                last_error = str(exc)
+                continue
+            try:
+                body = await self._gql_mutation(doc_id, variables, friendly_name, fb_dtsg, lsd)
+            except FetchError as exc:
+                last_error = str(exc)
+                if "1357001" in last_error or "redirected" in last_error:
+                    cm.invalidate_csrf_cache()
+                    continue
+                raise
+            body_str = str(body)
+            if "1357001" in body_str or '"not-logged-in"' in body_str:
+                last_error = "session flagged (1357001)"
+                cm.invalidate_csrf_cache()
+                continue
+            return body
+        raise FetchError(f"{friendly_name} failed after 3 attempts: {last_error}")
+
     async def dm_react(self, thread_id: str, item_id: str, emoji: str = "❤") -> Dict[str, Any]:
         """React to a DM message with an emoji (default: ❤)."""
         cm = self._cookie_manager
         if not cm or not getattr(cm, "is_authenticated", False):
             raise FetchError("dm_react requires authentication.")
-        fb_dtsg, lsd = await self._fetch_fb_tokens()
-        body = await self._gql_mutation(
+        body = await self._gql_mutation_with_retry(
             doc_id="3672524849516997",
             variables={"thread_id": thread_id, "item_id": item_id, "reaction": emoji},
             friendly_name="IGDirectSendEmojiReactionMutation",
-            fb_dtsg=fb_dtsg, lsd=lsd,
         )
         if body.get("error"):
             raise FetchError(f"dm_react failed: {body}")
@@ -3996,12 +4060,10 @@ class InstagramClient:
         cm = self._cookie_manager
         if not cm or not getattr(cm, "is_authenticated", False):
             raise FetchError("dm_unreact requires authentication.")
-        fb_dtsg, lsd = await self._fetch_fb_tokens()
-        body = await self._gql_mutation(
+        body = await self._gql_mutation_with_retry(
             doc_id="3672524849516997",
             variables={"thread_id": thread_id, "item_id": item_id, "reaction": ""},
             friendly_name="IGDirectSendEmojiReactionMutation",
-            fb_dtsg=fb_dtsg, lsd=lsd,
         )
         if body.get("error"):
             raise FetchError(f"dm_unreact failed: {body}")
@@ -4012,12 +4074,10 @@ class InstagramClient:
         cm = self._cookie_manager
         if not cm or not getattr(cm, "is_authenticated", False):
             raise FetchError("dm_unsend requires authentication.")
-        fb_dtsg, lsd = await self._fetch_fb_tokens()
-        body = await self._gql_mutation(
+        body = await self._gql_mutation_with_retry(
             doc_id="7166420300085783",
             variables={"thread_id": thread_id, "item_id": item_id},
             friendly_name="IGDirectDeleteItemMutation",
-            fb_dtsg=fb_dtsg, lsd=lsd,
         )
         if body.get("error"):
             raise FetchError(f"dm_unsend failed: {body}")
@@ -4028,12 +4088,10 @@ class InstagramClient:
         cm = self._cookie_manager
         if not cm or not getattr(cm, "is_authenticated", False):
             raise FetchError("dm_mark_seen requires authentication.")
-        fb_dtsg, lsd = await self._fetch_fb_tokens()
-        body = await self._gql_mutation(
+        body = await self._gql_mutation_with_retry(
             doc_id="5994298984009617",
             variables={"thread_id": thread_id, "last_seen_at": item_id},
             friendly_name="IGDirectMarkThreadSeenMutation",
-            fb_dtsg=fb_dtsg, lsd=lsd,
         )
         if body.get("error"):
             raise FetchError(f"dm_mark_seen failed: {body}")
@@ -4445,4 +4503,88 @@ class InstagramClient:
             "status": "unblocked",
             "user_id": user_id,
             "blocking": bool(fs.get("blocking")),
+        }
+
+    async def like_post(self, media_id: str, action: str = "like") -> Dict[str, Any]:
+        """Like or unlike an Instagram post via /api/v1/web/likes/."""
+        cm = self._cookie_manager
+        if not cm or not getattr(cm, "is_authenticated", False):
+            raise FetchError("like_post requires authentication.")
+        action = action.lower().strip()
+        if action not in ("like", "unlike"):
+            raise FetchError(f"like_post: action must be 'like' or 'unlike', got '{action}'")
+        session = await self._get_auth_session()
+        csrf = (cm.cookies.get("csrftoken", "")) or ""
+        resp = await session.post(
+            f"https://www.instagram.com/api/v1/web/likes/{media_id}/{action}/",
+            data={},
+            headers={
+                "x-csrftoken": csrf, "x-ig-app-id": "936619743392459",
+                "content-type": "application/x-www-form-urlencoded",
+                "referer": "https://www.instagram.com/",
+                "origin": "https://www.instagram.com",
+                "Cookie": self._cookie_str(),
+            },
+            allow_redirects=False,
+        )
+        if resp.status_code in (301, 302, 303, 307, 308):
+            raise FetchError(f"like_post: redirected (session rate-limited or expired)")
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"like_post: HTTP {resp.status_code}: {resp.text[:200]}")
+        body_text = resp.text
+        if body_text.lstrip().startswith("<"):
+            raise FetchError(f"like_post: got HTML (session blocked): {body_text[:150]}")
+        try:
+            body = _json.loads(body_text)
+        except Exception:
+            raise FetchError(f"like_post: invalid JSON: {body_text[:200]}")
+        if body.get("status") == "fail":
+            raise FetchError(f"like_post: API error: {body.get('message', 'unknown')}")
+        return {"status": action + "d", "media_id": media_id}
+
+    async def follow_user(self, user_id: str, action: str = "follow") -> Dict[str, Any]:
+        """Follow or unfollow an Instagram user."""
+        cm = self._cookie_manager
+        if not cm or not getattr(cm, "is_authenticated", False):
+            raise FetchError("follow_user requires authentication.")
+        action = action.lower().strip()
+        if action not in ("follow", "unfollow"):
+            raise FetchError(f"follow_user: action must be 'follow' or 'unfollow', got '{action}'")
+        session = await self._get_auth_session()
+        csrf = (cm.cookies.get("csrftoken", "")) or ""
+        endpoint = "create" if action == "follow" else "destroy"
+        headers = {
+            "x-csrftoken": csrf, "x-ig-app-id": "936619743392459",
+            "content-type": "application/x-www-form-urlencoded",
+            "referer": "https://www.instagram.com/",
+            "origin": "https://www.instagram.com",
+            "Cookie": self._cookie_str(),
+        }
+        # i.instagram.com accepts the session for friendships endpoints
+        resp = await session.post(
+            f"https://i.instagram.com/api/v1/friendships/{endpoint}/{user_id}/",
+            data={"user_id": user_id},
+            headers=headers,
+            allow_redirects=False,
+        )
+        if resp.status_code in (301, 302, 303, 307, 308):
+            raise FetchError(f"follow_user: redirected (session rate-limited or expired)")
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"follow_user: HTTP {resp.status_code}: {resp.text[:200]}")
+        body_text = resp.text
+        if body_text.lstrip().startswith("<"):
+            raise FetchError(f"follow_user: got HTML (session blocked): {body_text[:150]}")
+        try:
+            body = _json.loads(body_text)
+        except Exception:
+            raise FetchError(f"follow_user: invalid JSON: {body_text[:200]}")
+        if body.get("status") == "fail":
+            raise FetchError(f"follow_user: API error: {body.get('message', 'unknown')}")
+        fs = body.get("friendship_status") or {}
+        return {
+            "status": action + "ed",
+            "user_id": user_id,
+            "following": bool(fs.get("following")),
+            "is_private": bool(fs.get("is_private")),
+            "outgoing_request": bool(fs.get("outgoing_request")),
         }

@@ -99,69 +99,91 @@ def test_cookie_manager_resolve_path_exception():
 
 @pytest.mark.asyncio
 async def test_fetch_csrf_tokens():
-    session = AsyncMock()
-    
-    # Success response
+    # _fetch_csrf_tokens now creates its own impersonated session internally.
+    # Patch the AsyncSession constructor in cookie_manager to control responses.
     resp = AsyncMock()
-    resp.text = '{"fb_dtsg":{"token":"fb123"}, "lsd":{"token":"lsd123"}'
-    session.get.return_value = resp
-    
-    fb_dtsg, lsd = await _fetch_csrf_tokens(session, {})
-    assert fb_dtsg == "fb123"
-    assert lsd == "lsd123"
-    
-    # Alternative response
-    resp.text = '"DTSGInitData", [], {"token": "fb123"} "LSD", [], {"token": "lsd123"}'
-    session.get.return_value = resp
-    fb_dtsg, lsd = await _fetch_csrf_tokens(session, {})
-    assert fb_dtsg == "fb123"
-    assert lsd == "lsd123"
-    
-    # Missing response
-    resp.text = 'nothing'
-    session.get.return_value = resp
-    fb_dtsg, lsd = await _fetch_csrf_tokens(session, {})
-    assert fb_dtsg is None
-    assert lsd is None
-    
-    # Exception response
-    session.get.side_effect = Exception("Network error")
-    fb_dtsg, lsd = await _fetch_csrf_tokens(session, {})
-    assert fb_dtsg is None
-    assert lsd is None
+    resp.status_code = 200
+
+    mock_session_instance = AsyncMock()
+    mock_session_instance.get.return_value = resp
+    mock_session_instance.cookies = MagicMock()
+    mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+    mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+    mock_session_instance.close = AsyncMock()
+
+    _PAD = "x" * 5100  # ensure pages pass the minimum-length guard
+
+    with patch("instagram_mcp.cookie_manager._AsyncSession", return_value=mock_session_instance):
+        # Success — fb_dtsg pattern
+        resp.text = _PAD + '{"fb_dtsg":{"token":"fb123"}, "lsd":{"token":"lsd123"}'
+        fb_dtsg, lsd = await _fetch_csrf_tokens(None, {})
+        assert fb_dtsg == "fb123"
+        assert lsd == "lsd123"
+
+        # Alternative — DTSGInitData pattern
+        resp.text = _PAD + '"DTSGInitData",[],{"token":"fb456"} "LSD",[],{"token":"lsd456"}'
+        fb_dtsg, lsd = await _fetch_csrf_tokens(None, {})
+        assert fb_dtsg == "fb456"
+        assert lsd == "lsd456"
+
+        # Missing tokens
+        resp.text = _PAD  # long enough to pass, but no tokens
+        fb_dtsg, lsd = await _fetch_csrf_tokens(None, {})
+        assert fb_dtsg is None
+        assert lsd is None
+
+        # Exception from session.get
+        mock_session_instance.get.side_effect = Exception("Network error")
+        fb_dtsg, lsd = await _fetch_csrf_tokens(None, {})
+        assert fb_dtsg is None
+        assert lsd is None
 
 @pytest.mark.asyncio
 async def test_cookie_manager_ensure_csrf_tokens():
     cm = CookieManager()
-    session = AsyncMock()
+
     resp = AsyncMock()
+    resp.status_code = 200
     resp.text = '{"fb_dtsg":{"token":"fb123"}, "lsd":{"token":"lsd123"}'
-    session.get.return_value = resp
-    
-    tokens = await cm.ensure_csrf_tokens(session)
-    assert tokens == ("fb123", "lsd123")
-    assert cm.fb_dtsg == "fb123"
-    assert cm.lsd == "lsd123"
-    
-    # Cached within TTL (lines 164-165)
-    cm._csrf_cache = None
-    tokens2 = await cm.ensure_csrf_tokens(session)
-    assert tokens2 == ("fb123", "lsd123")
-    
-    # Fast path cache hit
-    tokens3 = await cm.ensure_csrf_tokens(session)
-    assert tokens3 == ("fb123", "lsd123")
+
+    mock_session_instance = AsyncMock()
+    mock_session_instance.get.return_value = resp
+    mock_session_instance.cookies = MagicMock()
+    mock_session_instance.close = AsyncMock()
+
+    with patch("instagram_mcp.cookie_manager._AsyncSession", return_value=mock_session_instance):
+        resp.text = "x" * 5100 + '{"fb_dtsg":{"token":"fb123"}, "lsd":{"token":"lsd123"}'
+        tokens = await cm.ensure_csrf_tokens(None)
+        assert tokens == ("fb123", "lsd123")
+        assert cm.fb_dtsg == "fb123"
+        assert cm.lsd == "lsd123"
+
+        # Fast path: cache hit within TTL
+        tokens2 = await cm.ensure_csrf_tokens(None)
+        assert tokens2 == ("fb123", "lsd123")
+
+        # After invalidation, re-fetches
+        cm.invalidate_csrf_cache()
+        tokens3 = await cm.ensure_csrf_tokens(None)
+        assert tokens3 == ("fb123", "lsd123")
 
 @pytest.mark.asyncio
 async def test_cookie_manager_ensure_csrf_tokens_failure():
     cm = CookieManager()
-    session = AsyncMock()
+
     resp = AsyncMock()
+    resp.status_code = 200
     resp.text = 'nothing'
-    session.get.return_value = resp
-    
-    with pytest.raises(RuntimeError, match="Could not extract fb_dtsg/lsd"):
-        await cm.ensure_csrf_tokens(session)
+
+    mock_session_instance = AsyncMock()
+    mock_session_instance.get.return_value = resp
+    mock_session_instance.cookies = MagicMock()
+    mock_session_instance.close = AsyncMock()
+
+    with patch("instagram_mcp.cookie_manager._AsyncSession", return_value=mock_session_instance):
+        resp.text = "x" * 5100  # long page but no tokens
+        with pytest.raises(RuntimeError, match="Could not extract fb_dtsg/lsd"):
+            await cm.ensure_csrf_tokens(None)
 
 def test_cookie_manager_load_with_missing_sessionid(tmp_path):
     p = tmp_path / "cookies.txt"

@@ -34,6 +34,11 @@ import time
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
+try:
+    from curl_cffi.requests import AsyncSession as _AsyncSession
+except ImportError:  # pragma: no cover
+    _AsyncSession = None  # type: ignore
+
 logger = logging.getLogger("instagram_mcp.cookies")
 
 # Regex patterns for CSRF token extraction from Instagram HTML
@@ -44,7 +49,7 @@ _FB_DTSG_ALT_RE = re.compile(r'"DTSGInitData"\s*,\s*\[\]\s*,\s*\{"token"\s*:\s*"
 _LSD_ALT_RE = re.compile(r'"LSD"\s*,\s*\[\]\s*,\s*\{"token"\s*:\s*"([^"]+)"')
 
 # How long cached CSRF tokens stay valid (seconds) — they rotate periodically
-_CSRF_CACHE_TTL = 1800  # 30 minutes
+_CSRF_CACHE_TTL = 900  # 15 minutes
 
 
 class CookieManager:
@@ -125,6 +130,12 @@ class CookieManager:
     @property
     def lsd(self) -> Optional[str]:
         return self._lsd
+
+    def invalidate_csrf_cache(self) -> None:
+        """Force re-fetch of CSRF tokens on next request."""
+        self._csrf_cache = None
+        self._csrf_fetched_at = 0.0
+        logger.debug("CSRF token cache invalidated")
 
     def auth_required_error(self) -> str:
         """Friendly error message shown when cookies are missing."""
@@ -279,47 +290,77 @@ def _parse_netscape_cookies(raw: str) -> Dict[str, str]:
 
 async def _fetch_csrf_tokens(session, cookies: Dict[str, str]) -> Tuple[Optional[str], Optional[str]]:
     """
-    Fetch instagram.com homepage and extract fb_dtsg + lsd from the HTML.
-    Returns (fb_dtsg, lsd) — either may be None on parse failure.
+    Fetch Instagram HTML and extract fb_dtsg + lsd tokens.
+
+    Creates a fresh impersonated session with pure browser headers (no x-ig-*).
+    The `session` parameter is kept for API compatibility but not used for the GET —
+    the auth session has x-ig-app-id in its defaults, which causes Instagram to
+    serve a JSON SPA response instead of the full HTML containing DTSGInitData.
     """
-    try:
-        resp = await session.get(
-            "https://www.instagram.com/",
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/142.0.0.0 Safari/537.36"
-                ),
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-            timeout=15,
-        )
-        html = resp.text
-    except Exception as exc:
-        logger.warning("Failed to fetch instagram.com for CSRF: %s", exc)
-        return None, None
+    _BROWSER_HEADERS = {
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "accept-language": "en-US,en;q=0.9",
+        "cache-control": "no-cache",
+        "pragma": "no-cache",
+        "sec-ch-ua": '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "document",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-site": "none",
+        "user-agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/148.0.0.0 Safari/537.36"
+        ),
+        "upgrade-insecure-requests": "1",
+    }
 
-    fb_dtsg = None
-    lsd = None
+    # Try authenticated pages first — DTSGInitData is more reliably embedded there
+    for url in [
+        "https://www.instagram.com/direct/inbox/",
+        "https://www.instagram.com/",
+    ]:
+        html = ""
+        try:
+            tmp = _AsyncSession(impersonate="chrome110")
+            try:
+                for name, value in cookies.items():
+                    tmp.cookies.set(name, value, domain=".instagram.com")
+                resp = await tmp.get(url, headers=_BROWSER_HEADERS, timeout=20, allow_redirects=True)
+                if resp.status_code == 200:
+                    html = resp.text
+            finally:
+                await tmp.close()
+        except Exception as exc:
+            logger.warning("Failed to fetch %s for CSRF: %s", url, exc)
 
-    for pattern in (_FB_DTSG_RE, _FB_DTSG_ALT_RE):
-        m = pattern.search(html)
-        if m:
-            fb_dtsg = m.group(1)
-            break
+        if len(html) < 5000:
+            continue
 
-    for pattern in (_LSD_RE, _LSD_ALT_RE):
-        m = pattern.search(html)
-        if m:
-            lsd = m.group(1)
-            break
+        fb_dtsg = None
+        lsd = None
 
-    if not fb_dtsg or not lsd:
+        # DTSGInitData pattern first — most common in current Instagram HTML
+        for pattern in (_FB_DTSG_ALT_RE, _FB_DTSG_RE):
+            m = pattern.search(html)
+            if m:
+                fb_dtsg = m.group(1)
+                break
+
+        for pattern in (_LSD_ALT_RE, _LSD_RE):
+            m = pattern.search(html)
+            if m:
+                lsd = m.group(1)
+                break
+
+        if fb_dtsg and lsd:
+            logger.debug("CSRF tokens extracted from %s (fb_dtsg=%s…)", url, fb_dtsg[:12])
+            return fb_dtsg, lsd
+
         logger.debug(
-            "CSRF extraction: fb_dtsg=%s lsd=%s (HTML len=%d)",
-            bool(fb_dtsg), bool(lsd), len(html),
+            "CSRF extraction from %s: fb_dtsg=%s lsd=%s (HTML len=%d)",
+            url, bool(fb_dtsg), bool(lsd), len(html),
         )
 
-    return fb_dtsg, lsd
+    return None, None

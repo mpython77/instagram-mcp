@@ -148,6 +148,8 @@ from .models import (
     UserSearchInput,
     UserFollowersInput,
     BlockUserInput,
+    LikePostInput,
+    FollowUserInput,
     StoryMarkSeenInput,
     StoryReplyInput,
     EditProfileInput,
@@ -3709,6 +3711,73 @@ def register_tools(
                     data = await client.block_user(params.user_id)
                 icon = "🚫" if data["status"] == "blocked" else "✅"
                 return f"{icon} User {params.user_id} {data['status']}. blocking={data['blocking']}"
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_post_like
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_post_like",
+            annotations={
+                "title": "Instagram Like/Unlike Post",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_post_like(params: LikePostInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Like or unlike an Instagram post.
+
+            Args:
+                params: media_id (numeric post ID), action ('like' or 'unlike')
+            """
+            await ctx.info(f"instagram_post_like: media={params.media_id} action={params.action}")
+            try:
+                data = await client.like_post(params.media_id, params.action)
+                icon = "❤️" if data["status"] == "liked" else "🤍"
+                return f"{icon} Post {data['media_id']} {data['status']}."
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_follow_user
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_follow_user",
+            annotations={
+                "title": "Instagram Follow/Unfollow User",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_follow_user(params: FollowUserInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Follow or unfollow an Instagram user by numeric user_id.
+
+            Args:
+                params: user_id (numeric), action ('follow' or 'unfollow')
+            """
+            await ctx.info(f"instagram_follow_user: user_id={params.user_id} action={params.action}")
+            try:
+                data = await client.follow_user(params.user_id, params.action)
+                icon = "➕" if data["status"] == "followed" else "➖"
+                extra = ""
+                if data.get("outgoing_request"):
+                    extra = " (follow request sent — account is private)"
+                elif data.get("following"):
+                    extra = " (now following)"
+                return f"{icon} User {data['user_id']} {data['status']}.{extra}"
             except Exception as e:
                 raise _exception_to_tool_error(e)
 

@@ -1715,6 +1715,22 @@ class BlockUserInput(BaseModel):
     action: str = Field(default="block", description="'block' or 'unblock'.")
 
 
+class LikePostInput(BaseModel):
+    """Input for instagram_post_like tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    media_id: str = Field(..., description="Numeric post media_id to like or unlike.", min_length=1)
+    action: str = Field(default="like", description="'like' or 'unlike'.")
+
+
+class FollowUserInput(BaseModel):
+    """Input for instagram_follow_user tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    user_id: str = Field(..., description="Numeric user ID to follow or unfollow.", min_length=1)
+    action: str = Field(default="follow", description="'follow' or 'unfollow'.")
+
+
 # ── Story Actions ──────────────────────────────────────────────────────────────
 
 class StoryMarkSeenInput(BaseModel):
