@@ -3137,6 +3137,94 @@ class InstagramClient:
         url = "https://www.instagram.com/api/v1/media/configure_sidecar/"
         return await self._post_configure(session, csrf, url, payload, "carousel", len(uploads), cookie_header=cookie_header, as_json=True)
 
+    async def publish_story(
+        self,
+        image_path: str,
+        close_friends_only: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Publish a photo story. Auth required.
+
+        Flow:
+          1. Upload image via /rupload_igphoto/ (same as post upload)
+          2. POST to /api/v1/media/configure_to_story/ with configure_mode=1
+
+        Returns:
+            dict with: ok, media_id, story_url (if code available)
+        """
+        cm = self._cookie_manager
+        if cm is None or not getattr(cm, "is_authenticated", False):
+            raise FetchError("publish_story requires authentication.")
+
+        session = await self._get_auth_session()
+        csrf = (cm.cookies.get("csrftoken", "") if cm else "") or ""
+        cookie_header = self._cookie_str()
+
+        upload_id, w, h = await self._upload_single_image(
+            session, csrf, cookie_header, image_path, is_sidecar=False
+        )
+
+        uid = (cm.cookies.get("ds_user_id", "") if cm else "") or ""
+        device_id = (cm.cookies.get("ig_did", "") if cm else "") or ""
+
+        payload: Dict[str, Any] = {
+            "upload_id":                upload_id,
+            "source_type":              "4",
+            "configure_mode":           "1",
+            "post_to_close_friends_only": "1" if close_friends_only else "0",
+        }
+        if uid:
+            payload["_uid"] = uid
+        if device_id:
+            payload["_uuid"] = device_id
+            payload["device_id"] = device_id
+
+        url = "https://www.instagram.com/api/v1/media/configure_to_story/"
+        headers = {
+            "User-Agent":       self._config.ig_user_agent,
+            "Accept":           "*/*",
+            "Accept-Language":  "en-US,en;q=0.9",
+            "Origin":           "https://www.instagram.com",
+            "Referer":          "https://www.instagram.com/",
+            "x-ig-app-id":      self._config.ig_app_id,
+            "x-csrftoken":      csrf,
+            "Content-Type":     "application/x-www-form-urlencoded",
+            "Cookie":           cookie_header,
+        }
+        try:
+            resp = await session.post(url, data=payload, headers=headers, timeout=30)
+        except Exception as exc:
+            raise FetchError(f"configure_to_story failed: {exc}") from exc
+
+        if resp.status_code == 400:
+            try:
+                msg = resp.json().get("message") or resp.text[:300]
+            except Exception:
+                msg = resp.text[:300]
+            raise FetchError(f"configure_to_story 400: {msg}")
+        if resp.status_code == 401:
+            raise FetchError("configure_to_story 401 — session expired. Re-export cookies.")
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"configure_to_story HTTP {resp.status_code}: {resp.text[:300]}")
+
+        try:
+            body = resp.json()
+        except Exception:
+            raise FetchError(f"configure_to_story non-JSON: {resp.text[:200]}")
+
+        if body.get("status") == "fail":
+            raise FetchError(f"configure_to_story API error: {body.get('message', 'unknown')}")
+
+        media = body.get("media") or {}
+        media_id = str(media.get("pk") or media.get("id") or "")
+        code = str(media.get("code") or "")
+
+        return {
+            "ok":       True,
+            "media_id": media_id,
+            "story_url": f"https://www.instagram.com/stories/{uid}/{media_id}/" if media_id else "",
+        }
+
     async def _post_configure(
         self,
         session: Any,
@@ -4154,6 +4242,44 @@ class InstagramClient:
             "media_id": media_id,
         }
 
+    async def delete_comment(self, media_id: str, comment_id: str) -> Dict[str, Any]:
+        """Delete a comment on an Instagram post (own comment or on own post)."""
+        cm = self._cookie_manager
+        if not cm or not getattr(cm, "is_authenticated", False):
+            raise FetchError("delete_comment requires authentication.")
+        session = await self._get_auth_session()
+        csrf = (cm.cookies.get("csrftoken", "")) or ""
+        headers = {
+            "x-csrftoken": csrf, "x-ig-app-id": "936619743392459",
+            "content-type": "application/x-www-form-urlencoded",
+            "accept": "application/json, */*",
+            "referer": "https://www.instagram.com/",
+            "origin": "https://www.instagram.com",
+            "Cookie": self._cookie_str(),
+        }
+        for host in ("https://www.instagram.com", "https://i.instagram.com"):
+            resp = await session.post(
+                f"{host}/api/v1/media/{media_id}/comment/{comment_id}/delete/",
+                data={"comment_or_caption": "0"},
+                headers=headers,
+                allow_redirects=False,
+            )
+            if resp.status_code in (301, 302, 303, 307, 308):
+                continue
+            body_text = resp.text
+            if resp.status_code not in (200, 201):
+                raise FetchError(f"delete_comment: HTTP {resp.status_code}: {body_text[:200]}")
+            if body_text.lstrip().startswith("<"):
+                raise FetchError(f"delete_comment: got HTML (session blocked): {body_text[:150]}")
+            try:
+                body = _json.loads(body_text)
+            except Exception:
+                raise FetchError(f"delete_comment: invalid JSON: {body_text[:200]}")
+            if body.get("status") == "fail":
+                raise FetchError(f"delete_comment: API error: {body.get('message', 'unknown')}")
+            return {"status": "deleted", "comment_id": comment_id, "media_id": media_id}
+        raise FetchError("delete_comment: all hosts redirected (session rate-limited)")
+
     async def search_users(self, query: str, count: int = 10) -> List[Dict[str, Any]]:
         """Search Instagram users by query string."""
         cm = self._cookie_manager
@@ -4587,4 +4713,238 @@ class InstagramClient:
             "following": bool(fs.get("following")),
             "is_private": bool(fs.get("is_private")),
             "outgoing_request": bool(fs.get("outgoing_request")),
+        }
+
+    # ── Instagram Notes ───────────────────────────────────────────────────────
+
+    async def _notes_headers(self) -> Tuple[Any, Dict[str, str]]:
+        """Return (session, headers) for Notes API calls."""
+        cm = self._cookie_manager
+        if not cm or not getattr(cm, "is_authenticated", False):
+            raise FetchError("Notes tools require authentication.")
+        session = await self._get_auth_session()
+        csrf = (cm.cookies.get("csrftoken", "")) or ""
+        headers = {
+            "x-csrftoken": csrf,
+            "x-ig-app-id": self._config.ig_app_id,
+            "content-type": "application/x-www-form-urlencoded",
+            "accept": "application/json, */*",
+            "referer": "https://www.instagram.com/",
+            "origin": "https://www.instagram.com",
+            "Cookie": self._cookie_str(),
+        }
+        return session, headers
+
+    async def notes_create(self, text: str, audience: int = 0) -> Dict[str, Any]:
+        """
+        Create an Instagram Note (visible for 24 h).
+
+        Args:
+            text: Note text (max 60 chars).
+            audience: 0 = followers, 1 = close friends.
+
+        Returns:
+            dict with note_id, text, audience, expires_at.
+        """
+        if len(text) > 60:
+            raise FetchError("Note text must be 60 characters or less.")
+        session, headers = await self._notes_headers()
+        resp = await session.post(
+            "https://i.instagram.com/api/v1/notes/create_note/",
+            data={
+                "text": text,
+                "audience": str(audience),
+            },
+            headers=headers,
+            allow_redirects=False,
+        )
+        if resp.status_code in (301, 302, 303, 307, 308):
+            raise FetchError("notes_create: redirected — session rate-limited or not logged in")
+        body_text = resp.text
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"notes_create: HTTP {resp.status_code}: {body_text[:200]}")
+        if body_text.lstrip().startswith("<"):
+            raise FetchError(f"notes_create: got HTML (session blocked): {body_text[:150]}")
+        try:
+            body = _json.loads(body_text)
+        except Exception:
+            raise FetchError(f"notes_create: invalid JSON: {body_text[:200]}")
+        if body.get("status") == "fail":
+            raise FetchError(f"notes_create: API error: {body.get('message', 'unknown')}")
+        note = body.get("note") or {}
+        return {
+            "note_id": str(note.get("id", "")),
+            "text": note.get("text", text),
+            "audience": note.get("audience", audience),
+            "expires_at": note.get("expires_at"),
+        }
+
+    async def notes_get(self) -> List[Dict[str, Any]]:
+        """
+        Get your active Instagram Notes.
+
+        Returns:
+            List of note dicts (note_id, text, audience, expires_at, username).
+        """
+        session, headers = await self._notes_headers()
+        get_headers = {k: v for k, v in headers.items() if k != "content-type"}
+        resp = await session.get(
+            "https://i.instagram.com/api/v1/notes/get_notes/",
+            headers=get_headers,
+            allow_redirects=False,
+        )
+        if resp.status_code in (301, 302, 303, 307, 308):
+            raise FetchError("notes_get: redirected — session rate-limited or not logged in")
+        body_text = resp.text
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"notes_get: HTTP {resp.status_code}: {body_text[:200]}")
+        if body_text.lstrip().startswith("<"):
+            raise FetchError(f"notes_get: got HTML (session blocked): {body_text[:150]}")
+        try:
+            body = _json.loads(body_text)
+        except Exception:
+            raise FetchError(f"notes_get: invalid JSON: {body_text[:200]}")
+        notes_raw = body.get("notes") or []
+        result = []
+        for n in notes_raw:
+            result.append({
+                "note_id": str(n.get("id", "")),
+                "text": n.get("text", ""),
+                "audience": n.get("audience", 0),
+                "expires_at": n.get("expires_at"),
+                "username": (n.get("user") or {}).get("username", ""),
+            })
+        return result
+
+    async def notes_delete(self, note_id: str) -> Dict[str, Any]:
+        """
+        Delete an Instagram Note by ID.
+
+        Returns:
+            dict with status='deleted', note_id.
+        """
+        session, headers = await self._notes_headers()
+        resp = await session.post(
+            f"https://i.instagram.com/api/v1/notes/delete_note/",
+            data={"note_id": note_id},
+            headers=headers,
+            allow_redirects=False,
+        )
+        if resp.status_code in (301, 302, 303, 307, 308):
+            raise FetchError("notes_delete: redirected — session rate-limited or not logged in")
+        body_text = resp.text
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"notes_delete: HTTP {resp.status_code}: {body_text[:200]}")
+        if body_text.lstrip().startswith("<"):
+            raise FetchError(f"notes_delete: got HTML (session blocked): {body_text[:150]}")
+        try:
+            body = _json.loads(body_text)
+        except Exception:
+            raise FetchError(f"notes_delete: invalid JSON: {body_text[:200]}")
+        if body.get("status") == "fail":
+            raise FetchError(f"notes_delete: API error: {body.get('message', 'unknown')}")
+        return {"status": "deleted", "note_id": note_id}
+
+    # ── Broadcast Channels ────────────────────────────────────────────────────
+
+    async def broadcast_channel_info(self, channel_id: str) -> Dict[str, Any]:
+        """
+        Get info about a broadcast channel (subscribers, title, description).
+
+        Args:
+            channel_id: The broadcast channel ID (from channel URL or DM).
+
+        Returns:
+            dict with channel_id, title, description, subscriber_count, is_pinned.
+        """
+        session = await self._get_auth_session()
+        cm = self._cookie_manager
+        csrf = (cm.cookies.get("csrftoken", "") if cm else "") or ""
+        headers = {
+            "x-csrftoken": csrf,
+            "x-ig-app-id": self._config.ig_app_id,
+            "accept": "application/json, */*",
+            "Cookie": self._cookie_str(),
+        }
+        resp = await session.get(
+            f"https://i.instagram.com/api/v1/broadcasts/{channel_id}/info/",
+            headers=headers,
+            allow_redirects=False,
+        )
+        if resp.status_code in (301, 302, 303, 307, 308):
+            raise FetchError("broadcast_channel_info: redirected — not logged in")
+        body_text = resp.text
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"broadcast_channel_info: HTTP {resp.status_code}: {body_text[:200]}")
+        if body_text.lstrip().startswith("<"):
+            raise FetchError(f"broadcast_channel_info: got HTML: {body_text[:150]}")
+        try:
+            body = _json.loads(body_text)
+        except Exception:
+            raise FetchError(f"broadcast_channel_info: invalid JSON: {body_text[:200]}")
+        if body.get("status") == "fail":
+            raise FetchError(f"broadcast_channel_info: {body.get('message', 'unknown')}")
+        ch = body.get("broadcast_channel") or body
+        return {
+            "channel_id": channel_id,
+            "title": ch.get("title", ""),
+            "description": ch.get("description", ""),
+            "subscriber_count": ch.get("subscriber_count", 0),
+            "is_pinned": ch.get("is_pinned", False),
+            "broadcast_status": ch.get("broadcast_status", ""),
+        }
+
+    async def broadcast_channel_posts(
+        self, channel_id: str, max_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get posts from a broadcast channel.
+
+        Returns:
+            dict with posts (list), next_max_id (for pagination), has_more.
+        """
+        session = await self._get_auth_session()
+        cm = self._cookie_manager
+        csrf = (cm.cookies.get("csrftoken", "") if cm else "") or ""
+        headers = {
+            "x-csrftoken": csrf,
+            "x-ig-app-id": self._config.ig_app_id,
+            "accept": "application/json, */*",
+            "Cookie": self._cookie_str(),
+        }
+        params: Dict[str, str] = {}
+        if max_id:
+            params["max_id"] = max_id
+        resp = await session.get(
+            f"https://i.instagram.com/api/v1/broadcasts/{channel_id}/posts/",
+            params=params,
+            headers=headers,
+            allow_redirects=False,
+        )
+        if resp.status_code in (301, 302, 303, 307, 308):
+            raise FetchError("broadcast_channel_posts: redirected — not logged in")
+        body_text = resp.text
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"broadcast_channel_posts: HTTP {resp.status_code}: {body_text[:200]}")
+        if body_text.lstrip().startswith("<"):
+            raise FetchError(f"broadcast_channel_posts: got HTML: {body_text[:150]}")
+        try:
+            body = _json.loads(body_text)
+        except Exception:
+            raise FetchError(f"broadcast_channel_posts: invalid JSON: {body_text[:200]}")
+        if body.get("status") == "fail":
+            raise FetchError(f"broadcast_channel_posts: {body.get('message', 'unknown')}")
+        items = body.get("broadcast_posts") or body.get("items") or []
+        posts = []
+        for item in items:
+            posts.append({
+                "post_id": str(item.get("pk", item.get("id", ""))),
+                "text": item.get("text", ""),
+                "created_at": item.get("created_at") or item.get("taken_at"),
+                "like_count": item.get("like_count", 0),
+            })
+        return {
+            "posts": posts,
+            "next_max_id": body.get("next_max_id"),
+            "has_more": bool(body.get("more_available") or body.get("next_max_id")),
         }

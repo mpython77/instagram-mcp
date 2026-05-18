@@ -1731,6 +1731,56 @@ class FollowUserInput(BaseModel):
     action: str = Field(default="follow", description="'follow' or 'unfollow'.")
 
 
+class DeleteCommentInput(BaseModel):
+    """Input for instagram_delete_comment tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    media_id: str = Field(..., description="Numeric media_id of the post.", min_length=1)
+    comment_id: str = Field(..., description="Numeric comment_id to delete.", min_length=1)
+
+
+class PublishStoryInput(BaseModel):
+    """Input for instagram_publish_story tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    image_path: str = Field(..., description="Local path to the image file (JPEG/PNG) to publish as a story.", min_length=1)
+    close_friends_only: bool = Field(default=False, description="If True, publish to Close Friends list only.")
+
+
+# ── Notes ─────────────────────────────────────────────────────────────────────
+
+class NotesCreateInput(BaseModel):
+    """Input for instagram_notes_create tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    text: str = Field(..., description="Note text (max 60 characters).", min_length=1, max_length=60)
+    audience: int = Field(
+        default=0,
+        description="Audience: 0 = followers you follow back, 1 = close friends.",
+    )
+
+
+class NotesDeleteInput(BaseModel):
+    """Input for instagram_notes_delete tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    note_id: str = Field(..., description="Note ID to delete (from instagram_notes_get).", min_length=1)
+
+
+# ── Broadcast Channels ────────────────────────────────────────────────────────
+
+class BroadcastChannelInput(BaseModel):
+    """Input for instagram_broadcast_channel tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    channel_id: str = Field(..., description="Broadcast channel ID.", min_length=1)
+    action: str = Field(
+        default="info",
+        description="Action: 'info' to get channel metadata, 'posts' to list recent posts.",
+    )
+    max_id: Optional[str] = Field(default=None, description="Pagination cursor from previous 'posts' call.")
+
+
 # ── Story Actions ──────────────────────────────────────────────────────────────
 
 class StoryMarkSeenInput(BaseModel):

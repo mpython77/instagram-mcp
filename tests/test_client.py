@@ -705,3 +705,220 @@ async def test_follow_user_api_error(client):
 async def test_follow_user_invalid_action(client):
     with pytest.raises(FetchError, match="action must be"):
         await client.follow_user("123", "invalid")
+
+
+# ── delete_comment tests ──────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_delete_comment_success(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = '{"status":"ok"}'
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post = AsyncMock(return_value=mock_resp)
+        result = await client.delete_comment("1234567890", "9876543210")
+        assert result["status"] == "deleted"
+        assert result["comment_id"] == "9876543210"
+        assert result["media_id"] == "1234567890"
+
+
+@pytest.mark.asyncio
+async def test_delete_comment_redirected(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 302
+    mock_resp.text = ""
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post = AsyncMock(return_value=mock_resp)
+        with pytest.raises(FetchError, match="redirected"):
+            await client.delete_comment("111", "222")
+
+
+@pytest.mark.asyncio
+async def test_delete_comment_api_error(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = '{"status":"fail","message":"Not authorized"}'
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post = AsyncMock(return_value=mock_resp)
+        with pytest.raises(FetchError, match="API error"):
+            await client.delete_comment("111", "222")
+
+
+@pytest.mark.asyncio
+async def test_delete_comment_no_auth(mock_config, mock_proxy_manager, mock_rate_limiter, mock_cache):
+    cm = MagicMock()
+    cm.is_authenticated = False
+    unauthenticated_client = InstagramClient(
+        config=mock_config,
+        proxy_manager=mock_proxy_manager,
+        rate_limiter=mock_rate_limiter,
+        cache=mock_cache,
+        cookie_manager=cm,
+    )
+    with pytest.raises(FetchError, match="requires authentication"):
+        await unauthenticated_client.delete_comment("111", "222")
+
+
+# ── publish_story tests ───────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_publish_story_no_auth(mock_config, mock_proxy_manager, mock_rate_limiter, mock_cache):
+    cm = MagicMock()
+    cm.is_authenticated = False
+    unauthenticated_client = InstagramClient(
+        config=mock_config,
+        proxy_manager=mock_proxy_manager,
+        rate_limiter=mock_rate_limiter,
+        cache=mock_cache,
+        cookie_manager=cm,
+    )
+    with pytest.raises(FetchError, match="requires authentication"):
+        await unauthenticated_client.publish_story("/tmp/test.jpg")
+
+
+@pytest.mark.asyncio
+async def test_publish_story_upload_failure(client):
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock):
+        with patch.object(client, "_upload_single_image", new_callable=AsyncMock) as mock_upload:
+            mock_upload.side_effect = FetchError("upload failed: connection refused")
+            with pytest.raises(FetchError, match="upload failed"):
+                await client.publish_story("/tmp/test.jpg")
+
+
+@pytest.mark.asyncio
+async def test_publish_story_success(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = '{"status":"ok","media":{"id":"111222333444555","code":"ABC123"}}'
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post = AsyncMock(return_value=mock_resp)
+        with patch.object(client, "_upload_single_image", new_callable=AsyncMock) as mock_upload:
+            mock_upload.return_value = ("upload_id_123", 1080, 1920)
+            result = await client.publish_story("/tmp/test.jpg", close_friends_only=False)
+            assert result["ok"] is True
+            assert "media_id" in result
+
+
+@pytest.mark.asyncio
+async def test_publish_story_close_friends(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = '{"status":"ok","media":{"id":"999888777666555","code":"XYZ789"}}'
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post = AsyncMock(return_value=mock_resp)
+        with patch.object(client, "_upload_single_image", new_callable=AsyncMock) as mock_upload:
+            mock_upload.return_value = ("upload_id_456", 1080, 1920)
+            result = await client.publish_story("/tmp/test.jpg", close_friends_only=True)
+            assert result["ok"] is True
+            call_kwargs = mock_session.post.call_args
+            sent_data = call_kwargs[1].get("data", call_kwargs[0][1] if len(call_kwargs[0]) > 1 else {})
+            assert sent_data.get("post_to_close_friends_only") == "1"
+
+
+# ── notes tests ───────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_notes_create_success(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = '{"status":"ok","note":{"id":"111","text":"hello","audience":0,"expires_at":9999999}}'
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post = AsyncMock(return_value=mock_resp)
+        result = await client.notes_create("hello")
+        assert result["note_id"] == "111"
+        assert result["text"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_notes_create_too_long(client):
+    with pytest.raises(FetchError, match="60 characters"):
+        await client.notes_create("x" * 61)
+
+
+@pytest.mark.asyncio
+async def test_notes_get_success(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = '{"status":"ok","notes":[{"id":"222","text":"hey","audience":0,"expires_at":9999999,"user":{"username":"me"}}]}'
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.get = AsyncMock(return_value=mock_resp)
+        result = await client.notes_get()
+        assert len(result) == 1
+        assert result[0]["note_id"] == "222"
+        assert result[0]["username"] == "me"
+
+
+@pytest.mark.asyncio
+async def test_notes_delete_success(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = '{"status":"ok"}'
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post = AsyncMock(return_value=mock_resp)
+        result = await client.notes_delete("333")
+        assert result["status"] == "deleted"
+        assert result["note_id"] == "333"
+
+
+@pytest.mark.asyncio
+async def test_notes_no_auth(mock_config, mock_proxy_manager, mock_rate_limiter, mock_cache):
+    cm = MagicMock()
+    cm.is_authenticated = False
+    unauthenticated_client = InstagramClient(
+        config=mock_config, proxy_manager=mock_proxy_manager,
+        rate_limiter=mock_rate_limiter, cache=mock_cache, cookie_manager=cm,
+    )
+    with pytest.raises(FetchError, match="require authentication"):
+        await unauthenticated_client.notes_create("test")
+
+
+# ── broadcast channel tests ───────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_broadcast_channel_info_success(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = '{"status":"ok","broadcast_channel":{"title":"My Channel","description":"desc","subscriber_count":1500,"is_pinned":false,"broadcast_status":"active"}}'
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.get = AsyncMock(return_value=mock_resp)
+        result = await client.broadcast_channel_info("abc123")
+        assert result["channel_id"] == "abc123"
+        assert result["title"] == "My Channel"
+        assert result["subscriber_count"] == 1500
+
+
+@pytest.mark.asyncio
+async def test_broadcast_channel_posts_success(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = '{"status":"ok","broadcast_posts":[{"pk":"555","text":"update!","created_at":1700000000,"like_count":42}],"next_max_id":"cursor999"}'
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.get = AsyncMock(return_value=mock_resp)
+        result = await client.broadcast_channel_posts("abc123")
+        assert len(result["posts"]) == 1
+        assert result["posts"][0]["post_id"] == "555"
+        assert result["posts"][0]["like_count"] == 42
+        assert result["next_max_id"] == "cursor999"
+        assert result["has_more"] is True
+
+
+@pytest.mark.asyncio
+async def test_broadcast_channel_redirected(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 302
+    mock_resp.text = ""
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.get = AsyncMock(return_value=mock_resp)
+        with pytest.raises(FetchError, match="redirected"):
+            await client.broadcast_channel_info("abc123")

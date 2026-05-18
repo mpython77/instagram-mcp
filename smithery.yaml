@@ -3,8 +3,9 @@ version: "1.1.0"
 description: >
   Production-grade MCP server for Instagram — profile scraping, post analytics,
   DM inbox/send, hashtag research, story viewing, social actions (like, follow,
-  comment, block), post scheduling, and more. 37 tools total. No API key needed
-  for 29 public tools; cookies.json required for authenticated features.
+  comment, block), story publishing, Notes, broadcast channels, and more.
+  43 tools total. No API key needed for public tools; cookies.json required for
+  authenticated features.
 
 startCommand:
   type: stdio
@@ -83,6 +84,18 @@ tools:
     description: Save or unsave a post (AUTH).
   - name: instagram_block_user
     description: Block or unblock a user (AUTH).
+  - name: instagram_delete_comment
+    description: Delete a comment on a post (AUTH).
+  - name: instagram_publish_story
+    description: Publish a photo as an Instagram Story (AUTH).
+  - name: instagram_notes_create
+    description: Create an Instagram Note visible for 24 hours (AUTH).
+  - name: instagram_notes_get
+    description: Get your active Instagram Notes (AUTH).
+  - name: instagram_notes_delete
+    description: Delete an Instagram Note by ID (AUTH).
+  - name: instagram_broadcast_channel
+    description: Read broadcast channel info or posts (AUTH).
   - name: instagram_edit_profile
     description: Update bio, name, or website (AUTH).
   - name: instagram_schedule

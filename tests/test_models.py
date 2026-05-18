@@ -252,3 +252,48 @@ def test_follow_user_input():
 
     p2 = FollowUserInput(user_id="123", action="unfollow")
     assert p2.action == "unfollow"
+
+
+def test_delete_comment_input():
+    from instagram_mcp.models import DeleteCommentInput
+    d = DeleteCommentInput(media_id="1234567890", comment_id="9876543210")
+    assert d.media_id == "1234567890"
+    assert d.comment_id == "9876543210"
+
+
+def test_publish_story_input():
+    from instagram_mcp.models import PublishStoryInput
+    p1 = PublishStoryInput(image_path="/tmp/photo.jpg")
+    assert p1.image_path == "/tmp/photo.jpg"
+    assert p1.close_friends_only is False
+
+    p2 = PublishStoryInput(image_path="/tmp/photo.jpg", close_friends_only=True)
+    assert p2.close_friends_only is True
+
+
+def test_notes_create_input():
+    from instagram_mcp.models import NotesCreateInput
+    n = NotesCreateInput(text="hello world")
+    assert n.text == "hello world"
+    assert n.audience == 0
+
+    n2 = NotesCreateInput(text="close", audience=1)
+    assert n2.audience == 1
+
+
+def test_notes_delete_input():
+    from instagram_mcp.models import NotesDeleteInput
+    d = NotesDeleteInput(note_id="12345")
+    assert d.note_id == "12345"
+
+
+def test_broadcast_channel_input():
+    from instagram_mcp.models import BroadcastChannelInput
+    b = BroadcastChannelInput(channel_id="abc123")
+    assert b.channel_id == "abc123"
+    assert b.action == "info"
+    assert b.max_id is None
+
+    b2 = BroadcastChannelInput(channel_id="xyz", action="posts", max_id="cursor1")
+    assert b2.action == "posts"
+    assert b2.max_id == "cursor1"
