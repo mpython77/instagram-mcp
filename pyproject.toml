@@ -4,11 +4,29 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "instagram-mcp"
-version = "1.0.0"
-description = "Production-grade MCP server for Instagram data — no login required"
+version = "1.1.0"
+description = "Production-grade MCP server for Instagram — scraping, DMs, scheduling, and social actions"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
+authors = [
+    {name = "mpython77", email = "notnightmarelabs1@gmail.com"},
+]
+keywords = [
+    "instagram", "mcp", "model-context-protocol", "claude", "scraping",
+    "social-media", "instagram-api", "anthropic",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
     "mcp[cli]>=1.0.0",
     "curl-cffi>=0.7.0",
@@ -17,6 +35,11 @@ dependencies = [
     "Pillow>=10.0.0",
     'uvloop>=0.20; sys_platform != "win32"',
 ]
+
+[project.urls]
+Homepage = "https://github.com/mpython77/instagram-mcp"
+Repository = "https://github.com/mpython77/instagram-mcp"
+Issues = "https://github.com/mpython77/instagram-mcp/issues"
 
 [project.scripts]
 instagram-mcp = "instagram_mcp:run_server"

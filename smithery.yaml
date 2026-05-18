@@ -1,0 +1,115 @@
+name: instagram-mcp
+version: "1.1.0"
+description: >
+  Production-grade MCP server for Instagram — profile scraping, post analytics,
+  DM inbox/send, hashtag research, story viewing, social actions (like, follow,
+  comment, block), post scheduling, and more. 37 tools total. No API key needed
+  for 29 public tools; cookies.json required for authenticated features.
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      cookies_path:
+        type: string
+        description: >
+          Path to your exported Instagram cookies file (cookies.json from
+          Cookie-Editor or cookies.txt in Netscape format). Required only for
+          authenticated tools (DMs, likes, follow, upload, etc.).
+        default: "cookies.json"
+      proxy_url:
+        type: string
+        description: >
+          Optional HTTP/HTTPS proxy URL (e.g. "http://user:pass@host:port").
+          Useful for rotating IPs to avoid rate-limiting.
+        default: ""
+    additionalProperties: false
+  commandFunction: |-
+    (config) => {
+      const args = ["run", "-m", "instagram_mcp"];
+      if (config.cookies_path) {
+        args.push("--cookies", config.cookies_path);
+      }
+      return {
+        command: "python",
+        args,
+        env: config.proxy_url ? { INSTAGRAM_MCP_PROXY: config.proxy_url } : {}
+      };
+    }
+
+tools:
+  - name: instagram_profile
+    description: Get profile metadata, follower/following counts, recent posts.
+  - name: instagram_feed_deep
+    description: Paginated feed analysis up to 200 posts.
+  - name: instagram_post
+    description: Full details for a single post (location, caption, hashtags, music).
+  - name: instagram_post_comments
+    description: Fetch comments on a post with pagination.
+  - name: instagram_post_likers
+    description: Users who liked a post (AUTH).
+  - name: instagram_hashtag
+    description: Trending/top posts for a hashtag.
+  - name: instagram_hashtag_deep
+    description: Deep hashtag scraping up to 500 posts.
+  - name: instagram_stories
+    description: Active stories for a user (AUTH).
+  - name: instagram_highlights
+    description: Story highlight reels for a user.
+  - name: instagram_reels
+    description: Reels feed for a user.
+  - name: instagram_search
+    description: Search users, hashtags, or locations.
+  - name: instagram_dm_inbox
+    description: List DM threads (AUTH).
+  - name: instagram_dm_thread
+    description: Read a specific DM thread (AUTH).
+  - name: instagram_dm_send
+    description: Send a direct message (AUTH).
+  - name: instagram_dm_react
+    description: React to a DM message with an emoji (AUTH).
+  - name: instagram_dm_unsend
+    description: Unsend a DM message (AUTH).
+  - name: instagram_dm_mark_seen
+    description: Mark a DM thread as seen (AUTH).
+  - name: instagram_post_like
+    description: Like or unlike a post (AUTH).
+  - name: instagram_follow_user
+    description: Follow or unfollow a user (AUTH).
+  - name: instagram_post_comment
+    description: Post a comment on a post (AUTH).
+  - name: instagram_post_save
+    description: Save or unsave a post (AUTH).
+  - name: instagram_block_user
+    description: Block or unblock a user (AUTH).
+  - name: instagram_edit_profile
+    description: Update bio, name, or website (AUTH).
+  - name: instagram_schedule
+    description: Schedule posts for future publishing (AUTH).
+  - name: instagram_monitor
+    description: Monitor an account for new posts with webhook notifications.
+  - name: instagram_sessions
+    description: Manage multiple Instagram accounts.
+  - name: instagram_download
+    description: Download media from a post URL.
+  - name: instagram_upload_photo
+    description: Upload a photo post (AUTH).
+  - name: instagram_analyze_engagement
+    description: Engagement rate analytics for a profile.
+  - name: instagram_compare_profiles
+    description: Side-by-side comparison of 2-5 accounts.
+  - name: instagram_bulk_check
+    description: Fetch up to 20 accounts in parallel.
+  - name: instagram_batch_scrape
+    description: High-concurrency scraping up to 2000 profiles.
+  - name: instagram_find_collab_network
+    description: Map collaboration network (usertags, mentions, sponsors).
+  - name: instagram_similar_accounts
+    description: Find accounts similar to a given profile.
+  - name: instagram_niche_top
+    description: Top accounts in a niche/topic.
+  - name: instagram_location_posts
+    description: Posts from a specific location.
+  - name: instagram_audio_reels
+    description: Reels using a specific audio track.
