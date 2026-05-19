@@ -5046,7 +5046,10 @@ class InstagramClient:
             params=params,
             headers={"x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id,
                      "User-Agent": "Instagram 317.0.0.24.109 Android (31/12; 420dpi; 1080x2170; Google; Pixel 5; redfin; qcom; en_US; 558903590)"},
+            allow_redirects=False,
         )
+        if resp.status_code in (301, 302, 303, 307, 308):
+            raise FetchError("saved_posts: redirected (session rate-limited)")
         if resp.status_code not in (200, 201):
             raise FetchError(f"saved_posts: HTTP {resp.status_code}: {resp.text[:200]}")
         try:
@@ -5091,7 +5094,10 @@ class InstagramClient:
             params=params,
             headers={"x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id,
                      "User-Agent": "Instagram 317.0.0.24.109 Android (31/12; 420dpi; 1080x2170; Google; Pixel 5; redfin; qcom; en_US; 558903590)"},
+            allow_redirects=False,
         )
+        if resp.status_code in (301, 302, 303, 307, 308):
+            raise FetchError("liked_posts: redirected (session rate-limited)")
         if resp.status_code not in (200, 201):
             raise FetchError(f"liked_posts: HTTP {resp.status_code}: {resp.text[:200]}")
         try:
@@ -5195,8 +5201,11 @@ class InstagramClient:
                     break
             return users
 
-        follower_ids = await _fetch_all("followers") if analysis_type in ("both", "fans") else set()
-        following_ids = await _fetch_all("following") if analysis_type in ("both", "unfollowers") else set()
+        # Both sets are required for any analysis type:
+        # unfollowers = following − followers  (need both)
+        # fans        = followers − following  (need both)
+        follower_ids = await _fetch_all("followers")
+        following_ids = await _fetch_all("following")
 
         result: Dict[str, Any] = {}
         if analysis_type in ("both", "unfollowers"):

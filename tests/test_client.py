@@ -1227,3 +1227,84 @@ async def test_story_mark_seen_redirected(client):
         mock_session.post = AsyncMock(return_value=mock_resp)
         with pytest.raises(FetchError, match="redirected"):
             await client.story_mark_seen(["mid1"], ["oid1"], [1700000000])
+
+
+@pytest.mark.asyncio
+async def test_compare_followers_unfollowers_needs_both_sets(client):
+    """compare_followers(unfollowers) must fetch BOTH followers and following.
+
+    Bug: previously follower_ids was set() when analysis_type='unfollowers',
+    making unfollowers = following - {} = all following (wrong).
+    """
+    followers_page = {"users": [{"pk": "A"}, {"pk": "B"}], "next_max_id": ""}
+    following_page = {"users": [{"pk": "B"}, {"pk": "C"}], "next_max_id": ""}
+
+    call_count = {"n": 0}
+
+    async def mock_auth_get(url, params, csrf, session, name):
+        call_count["n"] += 1
+        if "followers" in url:
+            return followers_page
+        return following_page
+
+    with patch.object(client, "_require_auth", new_callable=AsyncMock) as mock_req, \
+         patch.object(client, "_auth_get", side_effect=mock_auth_get):
+        mock_cm = MagicMock()
+        mock_cm.cookies = {"ds_user_id": "123", "csrftoken": "tok"}
+        mock_req.return_value = (mock_cm, MagicMock(), "tok")
+        result = await client.compare_followers("unfollowers", max_users=100)
+
+    # C follows me (in following) but A doesn't follow back => unfollower is C
+    assert set(result["unfollowers"]) == {"C"}
+    assert result["unfollower_count"] == 1
+    # Must have fetched BOTH endpoints (not just following)
+    assert call_count["n"] == 2
+
+
+@pytest.mark.asyncio
+async def test_compare_followers_fans_needs_both_sets(client):
+    """compare_followers(fans) must fetch BOTH sets to compute fans correctly."""
+    followers_page = {"users": [{"pk": "A"}, {"pk": "B"}], "next_max_id": ""}
+    following_page = {"users": [{"pk": "B"}, {"pk": "C"}], "next_max_id": ""}
+
+    async def mock_auth_get(url, params, csrf, session, name):
+        if "followers" in url:
+            return followers_page
+        return following_page
+
+    with patch.object(client, "_require_auth", new_callable=AsyncMock) as mock_req, \
+         patch.object(client, "_auth_get", side_effect=mock_auth_get):
+        mock_cm = MagicMock()
+        mock_cm.cookies = {"ds_user_id": "123", "csrftoken": "tok"}
+        mock_req.return_value = (mock_cm, MagicMock(), "tok")
+        result = await client.compare_followers("fans", max_users=100)
+
+    # A follows me but I don't follow A => fan is A
+    assert set(result["fans"]) == {"A"}
+    assert result["fan_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_saved_posts_redirected(client):
+    """saved_posts must raise FetchError on 302 (not silently follow redirect)."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 302
+    mock_resp.text = ""
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.get = AsyncMock(return_value=mock_resp)
+        with pytest.raises(FetchError, match="redirected"):
+            await client.saved_posts(limit=5)
+
+
+@pytest.mark.asyncio
+async def test_liked_posts_redirected(client):
+    """liked_posts must raise FetchError on 302 (not silently follow redirect)."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 302
+    mock_resp.text = ""
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.get = AsyncMock(return_value=mock_resp)
+        with pytest.raises(FetchError, match="redirected"):
+            await client.liked_posts(limit=5)
