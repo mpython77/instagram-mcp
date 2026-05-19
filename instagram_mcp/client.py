@@ -4371,6 +4371,890 @@ class InstagramClient:
             raise FetchError(f"dm_mark_seen failed: {body}")
         return {"status": "seen", "thread_id": thread_id, "item_id": item_id}
 
+    # ── P1: New DM methods ────────────────────────────────────────────────────
+
+    def _auth_headers(self, csrf: str, content_type: str = "application/x-www-form-urlencoded") -> Dict[str, str]:
+        """Standard authenticated request headers."""
+        return {
+            "x-csrftoken": csrf,
+            "x-ig-app-id": self._config.ig_app_id,
+            "content-type": content_type,
+            "accept": "application/json, */*",
+            "referer": "https://www.instagram.com/",
+            "origin": "https://www.instagram.com",
+            "Cookie": self._cookie_str(),
+        }
+
+    async def _auth_post(self, url: str, data: Any, csrf: str, session: Any, method_name: str) -> Dict[str, Any]:
+        """POST to an authenticated Instagram API endpoint and return parsed JSON."""
+        resp = await session.post(url, data=data, headers=self._auth_headers(csrf), allow_redirects=False)
+        if resp.status_code in (301, 302, 303, 307, 308):
+            raise FetchError(f"{method_name}: redirected to login (session rate-limited or expired)")
+        body_text = resp.text
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"{method_name}: HTTP {resp.status_code}: {body_text[:200]}")
+        if body_text.lstrip().startswith("<"):
+            raise FetchError(f"{method_name}: got HTML (session blocked): {body_text[:150]}")
+        try:
+            return _json.loads(body_text)
+        except Exception:
+            raise FetchError(f"{method_name}: invalid JSON: {body_text[:200]}")
+
+    async def _auth_get(self, url: str, params: Dict[str, str], csrf: str, session: Any, method_name: str) -> Dict[str, Any]:
+        """GET from an authenticated Instagram API endpoint and return parsed JSON."""
+        resp = await session.get(url, params=params, headers=self._auth_headers(csrf), allow_redirects=False)
+        if resp.status_code in (301, 302, 303, 307, 308):
+            raise FetchError(f"{method_name}: redirected to login (session rate-limited or expired)")
+        body_text = resp.text
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"{method_name}: HTTP {resp.status_code}: {body_text[:200]}")
+        if body_text.lstrip().startswith("<"):
+            raise FetchError(f"{method_name}: got HTML (session blocked): {body_text[:150]}")
+        try:
+            return _json.loads(body_text)
+        except Exception:
+            raise FetchError(f"{method_name}: invalid JSON: {body_text[:200]}")
+
+    async def _require_auth(self, method_name: str):
+        """Raise FetchError if not authenticated. Returns (cm, session, csrf)."""
+        cm = self._cookie_manager
+        if not cm or not getattr(cm, "is_authenticated", False):
+            raise FetchError(f"{method_name} requires authentication. Set up cookies.txt.")
+        session = await self._get_auth_session()
+        csrf = (cm.cookies.get("csrftoken", "")) or ""
+        return cm, session, csrf
+
+    async def dm_send_photo(
+        self,
+        photo_path: str,
+        thread_id: Optional[str] = None,
+        username: Optional[str] = None,
+        caption: str = "",
+    ) -> Dict[str, Any]:
+        """Send a photo as a Direct Message — upload via rupload then broadcast."""
+        cm, session, csrf = await self._require_auth("dm_send_photo")
+        cookie_header = self._cookie_str()
+
+        if not thread_id and username:
+            thread_id = await self.resolve_dm_thread_igid(username.lstrip("@"))
+        if not thread_id:
+            raise FetchError("dm_send_photo: provide thread_id or username")
+
+        # Step 1: upload image via rupload (same as story/feed upload)
+        upload_id, _w, _h = await self._upload_single_image(
+            session, csrf, cookie_header, photo_path, is_sidecar=False
+        )
+
+        # Step 2: broadcast the uploaded photo to the DM thread
+        uid = (cm.cookies.get("ds_user_id", "") if cm else "") or ""
+        device_id = (cm.cookies.get("ig_did", "") if cm else "") or ""
+        offline_id = str(int(time.time() * 1000)) + str(random.randint(100, 999))
+
+        data: Dict[str, str] = {
+            "upload_id": upload_id,
+            "thread_ids": _json.dumps([thread_id]),
+            "recipient_users": "[]",
+            "offline_threading_id": offline_id,
+        }
+        if uid:
+            data["_uid"] = uid
+        if device_id:
+            data["_uuid"] = device_id
+        if caption:
+            data["caption"] = caption
+
+        headers = {
+            "x-csrftoken": csrf,
+            "x-ig-app-id": self._config.ig_app_id,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "*/*",
+            "Origin": "https://www.instagram.com",
+            "Referer": "https://www.instagram.com/direct/inbox/",
+        }
+
+        resp = await session.post(
+            "https://www.instagram.com/api/v1/direct_v2/threads/broadcast/photo/",
+            data=data,
+            headers=headers,
+        )
+        body_text = resp.text
+        if resp.status_code in (301, 302, 303, 307, 308):
+            raise FetchError("dm_send_photo: redirected (session rate-limited)")
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"dm_send_photo: HTTP {resp.status_code}: {body_text[:300]}")
+        try:
+            body = _json.loads(body_text)
+        except Exception:
+            raise FetchError(f"dm_send_photo: invalid JSON: {body_text[:200]}")
+        if body.get("status") == "fail":
+            raise FetchError(f"dm_send_photo: API error: {body.get('message', 'unknown')}")
+        payload = (body.get("payload") or {})
+        item_id = payload.get("item_id", "")
+        return {"status": "sent", "item_id": item_id, "thread_id": thread_id, "upload_id": upload_id}
+
+    async def dm_send_video(
+        self,
+        video_path: str,
+        thread_id: Optional[str] = None,
+        username: Optional[str] = None,
+        thumbnail_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Send a video as a Direct Message (upload then broadcast)."""
+        import os as _os
+        cm, session, csrf = await self._require_auth("dm_send_video")
+
+        if not thread_id and username:
+            thread_id = await self.resolve_dm_thread_igid(username.lstrip("@"))
+        if not thread_id:
+            raise FetchError("dm_send_video: provide thread_id or username")
+
+        cookie_header = self._cookie_str()
+        upload_id, duration = await self._upload_video(session, csrf, cookie_header, video_path, is_reel=False)
+
+        # Optional thumbnail upload
+        sampled_image_upload_id = ""
+        if thumbnail_path and _os.path.isfile(thumbnail_path):
+            try:
+                sampled_image_upload_id, _, _ = await self._upload_single_image(
+                    session, csrf, cookie_header, thumbnail_path, is_sidecar=False
+                )
+            except Exception:
+                pass
+
+        payload: Dict[str, Any] = {
+            "upload_id": upload_id,
+            "thread_ids": _json.dumps([thread_id]),
+            "recipient_users": _json.dumps([]),
+            "video_result": "",
+        }
+        if sampled_image_upload_id:
+            payload["sampled_image_upload_id"] = sampled_image_upload_id
+
+        body = await self._auth_post(
+            "https://www.instagram.com/api/v1/direct_v2/threads/broadcast/video/",
+            payload,
+            csrf,
+            session,
+            "dm_send_video",
+        )
+        if body.get("status") == "fail":
+            raise FetchError(f"dm_send_video: API error: {body.get('message', 'unknown')}")
+        payload_resp = body.get("payload") or {}
+        item_id = payload_resp.get("item_id", "")
+        return {"status": "sent", "item_id": item_id, "thread_id": thread_id, "upload_id": upload_id}
+
+    async def dm_mute(self, thread_id: str, mute: bool = True) -> Dict[str, Any]:
+        """Mute or unmute a DM thread."""
+        cm = self._cookie_manager
+        if not cm or not getattr(cm, "is_authenticated", False):
+            raise FetchError("dm_mute requires authentication.")
+        session = await self._get_auth_session()
+        csrf = (cm.cookies.get("csrftoken", "")) or ""
+        endpoint = "mute" if mute else "unmute"
+        resp = await session.post(
+            f"https://www.instagram.com/api/v1/direct_v2/threads/{thread_id}/{endpoint}/",
+            data={},
+            headers={"x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id,
+                     "Content-Type": "application/x-www-form-urlencoded"},
+        )
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"dm_mute: HTTP {resp.status_code}: {resp.text[:200]}")
+        try:
+            body = resp.json()
+        except Exception:
+            raise FetchError(f"dm_mute: invalid JSON: {resp.text[:200]}")
+        if body.get("status") == "fail":
+            raise FetchError(f"dm_mute: {body.get('message', 'unknown error')}")
+        return {"status": "muted" if mute else "unmuted", "thread_id": thread_id}
+
+    async def dm_share_post(
+        self,
+        media_id: str,
+        thread_id: Optional[str] = None,
+        username: Optional[str] = None,
+        text: str = "",
+    ) -> Dict[str, Any]:
+        """Share an Instagram post to a DM thread or user."""
+        cm = self._cookie_manager
+        if not cm or not getattr(cm, "is_authenticated", False):
+            raise FetchError("dm_share_post requires authentication.")
+        session = await self._get_auth_session()
+        csrf = (cm.cookies.get("csrftoken", "")) or ""
+
+        if not thread_id and username:
+            thread_id = await self.resolve_dm_thread_igid(username.lstrip("@"))
+        if not thread_id:
+            raise FetchError("dm_share_post: provide thread_id or username")
+
+        data: Dict[str, Any] = {
+            "media_id": media_id,
+            "thread_ids": _json.dumps([thread_id]),
+            "recipient_users": _json.dumps([]),
+        }
+        if text:
+            data["text"] = text
+
+        resp = await session.post(
+            "https://www.instagram.com/api/v1/direct_v2/threads/broadcast/media_share/",
+            data=data,
+            headers={"x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id,
+                     "Content-Type": "application/x-www-form-urlencoded",
+                     "Cookie": self._cookie_str()},
+            allow_redirects=False,
+        )
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"dm_share_post: HTTP {resp.status_code}: {resp.text[:200]}")
+        try:
+            body = resp.json()
+        except Exception:
+            raise FetchError(f"dm_share_post: invalid JSON: {resp.text[:200]}")
+        if body.get("status") == "fail":
+            raise FetchError(f"dm_share_post: {body.get('message', 'unknown error')}")
+        payload = body.get("payload") or {}
+        return {
+            "status": "shared",
+            "thread_id": thread_id,
+            "media_id": media_id,
+            "item_id": payload.get("item_id", ""),
+        }
+
+    async def dm_media_messages(self, thread_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """List all media messages (photos, videos, shared posts) in a DM thread."""
+        data = await self.fetch_dm_thread(thread_id, limit=limit)
+        media_types = {"media", "reel_share", "clip", "felix_share", "xma_media_share", "animated_media", "voice_media"}
+        messages = data.get("messages", [])
+        return [m for m in messages if m.get("type") in media_types]
+
+    # ── P2: Comment methods ───────────────────────────────────────────────────
+
+    async def comment_reply(self, media_id: str, comment_id: str, text: str) -> Dict[str, Any]:
+        """Reply to a specific comment on an Instagram post."""
+        cm = self._cookie_manager
+        if not cm or not getattr(cm, "is_authenticated", False):
+            raise FetchError("comment_reply requires authentication.")
+        session = await self._get_auth_session()
+        csrf = (cm.cookies.get("csrftoken", "")) or ""
+        hdrs = {
+            "x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id,
+            "content-type": "application/x-www-form-urlencoded",
+            "accept": "application/json, */*",
+            "referer": "https://www.instagram.com/",
+            "origin": "https://www.instagram.com",
+            "Cookie": self._cookie_str(),
+        }
+        post_data = {
+            "comment_text": text,
+            "replied_to_comment_id": comment_id,
+            "idempotence_token": str(int(time.time() * 1000)),
+        }
+        body_text = ""
+        for host in ("https://www.instagram.com", "https://i.instagram.com"):
+            resp = await session.post(
+                f"{host}/api/v1/media/{media_id}/comment/",
+                data=post_data, headers=hdrs, allow_redirects=False,
+            )
+            body_text = resp.text
+            if resp.status_code in (301, 302, 303, 307, 308) or body_text.lstrip().startswith("<"):
+                continue
+            break
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"comment_reply: HTTP {resp.status_code}: {body_text[:200]}")
+        if body_text.lstrip().startswith("<"):
+            raise FetchError(f"comment_reply: got HTML (session blocked)")
+        try:
+            body = _json.loads(body_text)
+        except Exception:
+            raise FetchError(f"comment_reply: invalid JSON: {body_text[:200]}")
+        if body.get("status") == "fail":
+            raise FetchError(f"comment_reply: {body.get('message', 'unknown error')}")
+        comment = body.get("comment") or {}
+        return {
+            "status": "replied",
+            "comment_id": str(comment.get("pk") or comment.get("id") or ""),
+            "replied_to": comment_id,
+            "text": text,
+            "media_id": media_id,
+        }
+
+    async def comment_like(self, comment_id: str, action: str = "like") -> Dict[str, Any]:
+        """Like or unlike a comment on an Instagram post."""
+        action = action.lower().strip()
+        if action not in ("like", "unlike"):
+            raise FetchError(f"comment_like: action must be 'like' or 'unlike', got '{action}'")
+        cm = self._cookie_manager
+        if not cm or not getattr(cm, "is_authenticated", False):
+            raise FetchError("comment_like requires authentication.")
+        session = await self._get_auth_session()
+        csrf = (cm.cookies.get("csrftoken", "")) or ""
+        endpoint = "comment_like" if action == "like" else "comment_unlike"
+        hdrs = {
+            "x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id,
+            "content-type": "application/x-www-form-urlencoded",
+            "accept": "application/json, */*",
+            "referer": "https://www.instagram.com/",
+            "origin": "https://www.instagram.com",
+            "Cookie": self._cookie_str(),
+        }
+        body_text = ""
+        for host in ("https://www.instagram.com", "https://i.instagram.com"):
+            resp = await session.post(
+                f"{host}/api/v1/media/{comment_id}/{endpoint}/",
+                data={}, headers=hdrs, allow_redirects=False,
+            )
+            body_text = resp.text
+            if resp.status_code in (301, 302, 303, 307, 308) or body_text.lstrip().startswith("<"):
+                continue
+            break
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"comment_like: HTTP {resp.status_code}: {body_text[:200]}")
+        if body_text.lstrip().startswith("<"):
+            raise FetchError(f"comment_like: got HTML (session blocked)")
+        try:
+            body = _json.loads(body_text)
+        except Exception:
+            raise FetchError(f"comment_like: invalid JSON: {body_text[:200]}")
+        if body.get("status") == "fail":
+            raise FetchError(f"comment_like: {body.get('message', 'unknown error')}")
+        return {"status": action + "d", "comment_id": comment_id}
+
+    async def comment_hide(self, comment_id: str, hide: bool = True) -> Dict[str, Any]:
+        """Hide or unhide a comment on your post."""
+        cm = self._cookie_manager
+        if not cm or not getattr(cm, "is_authenticated", False):
+            raise FetchError("comment_hide requires authentication.")
+        session = await self._get_auth_session()
+        csrf = (cm.cookies.get("csrftoken", "")) or ""
+        endpoint = "flag_comment" if hide else "unflag_comment"
+        hdrs = {
+            "x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id,
+            "content-type": "application/x-www-form-urlencoded",
+            "accept": "application/json, */*",
+            "referer": "https://www.instagram.com/",
+            "origin": "https://www.instagram.com",
+            "Cookie": self._cookie_str(),
+        }
+        body_text = ""
+        for host in ("https://www.instagram.com", "https://i.instagram.com"):
+            resp = await session.post(
+                f"{host}/api/v1/media/{comment_id}/{endpoint}/",
+                data={}, headers=hdrs, allow_redirects=False,
+            )
+            body_text = resp.text
+            if resp.status_code in (301, 302, 303, 307, 308) or body_text.lstrip().startswith("<"):
+                continue
+            break
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"comment_hide: HTTP {resp.status_code}: {body_text[:200]}")
+        if body_text.lstrip().startswith("<"):
+            raise FetchError(f"comment_hide: got HTML (session blocked)")
+        try:
+            body = _json.loads(body_text)
+        except Exception:
+            raise FetchError(f"comment_hide: invalid JSON: {body_text[:200]}")
+        if body.get("status") == "fail":
+            raise FetchError(f"comment_hide: {body.get('message', 'unknown error')}")
+        return {"status": "hidden" if hide else "visible", "comment_id": comment_id}
+
+    # ── P3: Post management methods ───────────────────────────────────────────
+
+    async def post_delete(self, media_id: str) -> Dict[str, Any]:
+        """Permanently delete one of your own Instagram posts."""
+        _, session, csrf = await self._require_auth("post_delete")
+        # Fetch media info to determine media_type
+        media_type = "1"
+        try:
+            info_body = await self._auth_get(
+                f"https://www.instagram.com/api/v1/media/{media_id}/info/",
+                {}, csrf, session, "post_delete_info",
+            )
+            items = (info_body.get("items") or [{}])
+            media_type = str((items[0] if items else {}).get("media_type", 1))
+        except Exception:
+            pass
+
+        body = await self._auth_post(
+            f"https://www.instagram.com/api/v1/media/{media_id}/delete/",
+            {"media_id": media_id},
+            csrf, session, "post_delete",
+        )
+        if body.get("status") == "fail":
+            raise FetchError(f"post_delete: {body.get('message', 'unknown error')}")
+        return {"status": "deleted", "media_id": media_id}
+
+    async def toggle_comments(self, media_id: str, enabled: bool = True) -> Dict[str, Any]:
+        """Enable or disable comments on one of your Instagram posts."""
+        cm = self._cookie_manager
+        if not cm or not getattr(cm, "is_authenticated", False):
+            raise FetchError("toggle_comments requires authentication.")
+        session = await self._get_auth_session()
+        csrf = (cm.cookies.get("csrftoken", "")) or ""
+        endpoint = "enable_comments" if enabled else "disable_comments"
+        hdrs = {
+            "x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id,
+            "content-type": "application/x-www-form-urlencoded",
+            "accept": "application/json, */*",
+            "referer": "https://www.instagram.com/",
+            "origin": "https://www.instagram.com",
+            "Cookie": self._cookie_str(),
+        }
+        body_text = ""
+        for host in ("https://www.instagram.com", "https://i.instagram.com"):
+            resp = await session.post(
+                f"{host}/api/v1/media/{media_id}/{endpoint}/",
+                data={}, headers=hdrs, allow_redirects=False,
+            )
+            body_text = resp.text
+            if resp.status_code in (301, 302, 303, 307, 308) or body_text.lstrip().startswith("<"):
+                continue
+            break
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"toggle_comments: HTTP {resp.status_code}: {body_text[:200]}")
+        if body_text.lstrip().startswith("<"):
+            raise FetchError(f"toggle_comments: got HTML (session blocked)")
+        try:
+            body = _json.loads(body_text)
+        except Exception:
+            raise FetchError(f"toggle_comments: invalid JSON: {body_text[:200]}")
+        if body.get("status") == "fail":
+            raise FetchError(f"toggle_comments: {body.get('message', 'unknown error')}")
+        return {"status": "enabled" if enabled else "disabled", "media_id": media_id}
+
+    async def media_insights(self, media_id: str) -> Dict[str, Any]:
+        """Get performance insights for one of your Instagram posts."""
+        cm, session, csrf = await self._require_auth("media_insights")
+        hdrs = {
+            "x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id,
+            "accept": "application/json, */*",
+            "referer": "https://www.instagram.com/",
+            "Cookie": self._cookie_str(),
+        }
+        body_text = ""
+        for host in ("https://www.instagram.com", "https://i.instagram.com"):
+            resp = await session.get(
+                f"{host}/api/v1/insights/media_organic_insights/{media_id}/",
+                params={"ig_app_id": self._config.ig_app_id},
+                headers=hdrs, allow_redirects=False,
+            )
+            body_text = resp.text
+            if resp.status_code in (301, 302, 303, 307, 308) or body_text.lstrip().startswith("<"):
+                continue
+            break
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"media_insights: HTTP {resp.status_code}: {body_text[:200]}")
+        if body_text.lstrip().startswith("<"):
+            raise FetchError(f"media_insights: got HTML (session blocked)")
+        try:
+            body = _json.loads(body_text)
+        except Exception:
+            raise FetchError(f"media_insights: invalid JSON: {body_text[:200]}")
+        # Parse organic_insights node
+        insights_node = (
+            body.get("media_organic_insights")
+            or body.get("inline_insights_node")
+            or body
+        )
+        metrics = {}
+        for key in ("reach", "impressions", "saved", "likes", "comments", "shares", "profile_visits", "plays"):
+            val = insights_node.get(key) or insights_node.get(f"total_{key}")
+            if val is not None:
+                metrics[key] = val
+        # Also try inline_insights_node for business accounts
+        inline = body.get("inline_insights_node") or {}
+        metrics_arr = inline.get("metrics") or []
+        for m in metrics_arr:
+            name = m.get("name", "").lower()
+            value = m.get("value")
+            if name and value is not None:
+                metrics[name] = value
+        return {"media_id": media_id, "insights": metrics, "raw": insights_node}
+
+    async def upload_video_feed(
+        self,
+        video_path: str,
+        caption: str = "",
+        cover_path: Optional[str] = None,
+        disable_comments: bool = False,
+        hide_like_count: bool = False,
+    ) -> Dict[str, Any]:
+        """Upload a video as a regular Instagram feed post (not a Reel)."""
+        import os as _os
+        cm, session, csrf = await self._require_auth("upload_video_feed")
+        cookie_header = self._cookie_str()
+
+        upload_id, duration = await self._upload_video(session, csrf, cookie_header, video_path, is_reel=False)
+
+        cover_upload_id = ""
+        if cover_path and _os.path.isfile(cover_path):
+            try:
+                cover_upload_id, _, _ = await self._upload_single_image(session, csrf, cookie_header, cover_path, is_sidecar=False)
+            except Exception:
+                pass
+
+        uid = (cm.cookies.get("ds_user_id", "") if cm else "") or ""
+        device_id = (cm.cookies.get("ig_did", "") if cm else "") or ""
+
+        payload: Dict[str, Any] = {
+            "upload_id": upload_id,
+            "source_type": "3",
+            "caption": caption,
+            "media_type": "2",
+            "poster_frame_index": 0,
+            "audio_muted": False,
+            "disable_comments": "1" if disable_comments else "0",
+            "like_and_view_counts_disabled": "1" if hide_like_count else "0",
+        }
+        if uid:
+            payload["_uid"] = uid
+        if device_id:
+            payload["_uuid"] = device_id
+        if duration:
+            payload["length"] = round(duration, 3)
+        if cover_upload_id:
+            payload["cover_upload_id"] = cover_upload_id
+
+        return await self._post_configure(
+            session, csrf, "https://www.instagram.com/api/v1/media/upload_finish/",
+            payload, "video", 1, cookie_header=cookie_header, as_json=True,
+        )
+
+    # ── P4: Account & Feed methods ────────────────────────────────────────────
+
+    async def account_privacy(self, is_private: bool) -> Dict[str, Any]:
+        """Toggle account between private and public mode."""
+        cm = self._cookie_manager
+        if not cm or not getattr(cm, "is_authenticated", False):
+            raise FetchError("account_privacy requires authentication.")
+        session = await self._get_auth_session()
+        csrf = (cm.cookies.get("csrftoken", "")) or ""
+        uid = (cm.cookies.get("ds_user_id", "")) or ""
+        endpoint = "set_private" if is_private else "set_public"
+        hdrs = {
+            "x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id,
+            "content-type": "application/x-www-form-urlencoded",
+            "accept": "application/json, */*",
+            "referer": "https://www.instagram.com/",
+            "origin": "https://www.instagram.com",
+            "Cookie": self._cookie_str(),
+        }
+        body_text = ""
+        for host in ("https://www.instagram.com", "https://i.instagram.com"):
+            resp = await session.post(
+                f"{host}/api/v1/accounts/{endpoint}/",
+                data={"_csrftoken": csrf, "_uid": uid, "_uuid": (cm.cookies.get("ig_did") or "")},
+                headers=hdrs, allow_redirects=False,
+            )
+            body_text = resp.text
+            if resp.status_code in (301, 302, 303, 307, 308) or body_text.lstrip().startswith("<"):
+                continue
+            break
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"account_privacy: HTTP {resp.status_code}: {body_text[:200]}")
+        if body_text.lstrip().startswith("<"):
+            raise FetchError(f"account_privacy: got HTML (session blocked)")
+        try:
+            body = _json.loads(body_text)
+        except Exception:
+            raise FetchError(f"account_privacy: invalid JSON: {body_text[:200]}")
+        if body.get("status") == "fail":
+            raise FetchError(f"account_privacy: {body.get('message', 'unknown error')}")
+        return {"status": "private" if is_private else "public"}
+
+    async def home_feed(self, limit: int = 20, cursor: Optional[str] = None) -> Dict[str, Any]:
+        """Get home timeline — posts from accounts you follow."""
+        cm, session, csrf = await self._require_auth("home_feed")
+        mobile_ua = (
+            "Instagram 317.0.0.24.109 Android "
+            "(31/12; 420dpi; 1080x2170; Google; Pixel 5; redfin; qcom; en_US; 558903590)"
+        )
+        params: Dict[str, str] = {"count": str(min(limit, 50))}
+        if cursor:
+            params["max_id"] = cursor
+        # Try www first; fallback to i.instagram.com mobile if redirected
+        body: Dict[str, Any] = {}
+        for url, hdrs in [
+            (
+                "https://www.instagram.com/api/v1/feed/timeline/",
+                self._auth_headers(csrf, content_type="application/json"),
+            ),
+            (
+                "https://i.instagram.com/api/v1/feed/timeline/",
+                {
+                    "x-csrftoken": csrf,
+                    "x-ig-app-id": self._config.ig_app_id_mobile,
+                    "User-Agent": mobile_ua,
+                    "accept": "application/json, */*",
+                    "Cookie": self._cookie_str(),
+                },
+            ),
+        ]:
+            resp = await session.get(url, params=params, headers=hdrs, allow_redirects=False)
+            if resp.status_code in (301, 302, 303, 307, 308) or resp.text.lstrip().startswith("<"):
+                continue
+            if resp.status_code not in (200, 201):
+                raise FetchError(f"home_feed: HTTP {resp.status_code}: {resp.text[:200]}")
+            try:
+                body = _json.loads(resp.text)
+                break
+            except Exception:
+                raise FetchError(f"home_feed: invalid JSON: {resp.text[:200]}")
+        if not body:
+            raise FetchError("home_feed: all endpoints redirected (session rate-limited or expired)")
+        items_raw = body.get("feed_items") or body.get("items") or []
+        posts = []
+        for item in items_raw[:limit]:
+            media = item.get("media_or_ad") or item
+            pk = str(media.get("pk") or media.get("id") or "")
+            code = media.get("code") or media.get("shortcode") or ""
+            cap = media.get("caption") or {}
+            posts.append({
+                "media_id": pk,
+                "shortcode": code,
+                "media_type": media.get("media_type", 1),
+                "username": (media.get("user") or {}).get("username", ""),
+                "caption": cap.get("text", "") if isinstance(cap, dict) else str(cap or ""),
+                "like_count": media.get("like_count", 0),
+                "comment_count": media.get("comment_count", 0),
+                "taken_at": media.get("taken_at", 0),
+            })
+        return {
+            "posts": posts,
+            "count": len(posts),
+            "next_max_id": body.get("next_max_id", ""),
+            "more_available": body.get("more_available", False),
+        }
+
+    async def saved_posts(self, limit: int = 20, cursor: Optional[str] = None) -> Dict[str, Any]:
+        """Get your saved/bookmarked Instagram posts."""
+        cm = self._cookie_manager
+        if not cm or not getattr(cm, "is_authenticated", False):
+            raise FetchError("saved_posts requires authentication.")
+        session = await self._get_auth_session()
+        csrf = (cm.cookies.get("csrftoken", "")) or ""
+        params: Dict[str, str] = {"count": str(min(limit, 50))}
+        if cursor:
+            params["max_id"] = cursor
+        resp = await session.get(
+            "https://www.instagram.com/api/v1/feed/saved/",
+            params=params,
+            headers={"x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id,
+                     "User-Agent": "Instagram 317.0.0.24.109 Android (31/12; 420dpi; 1080x2170; Google; Pixel 5; redfin; qcom; en_US; 558903590)"},
+        )
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"saved_posts: HTTP {resp.status_code}: {resp.text[:200]}")
+        try:
+            body = resp.json()
+        except Exception:
+            raise FetchError(f"saved_posts: invalid JSON: {resp.text[:200]}")
+        items_raw = body.get("items") or []
+        posts = []
+        for item in items_raw[:limit]:
+            media = item.get("media") or item
+            pk = str(media.get("pk") or media.get("id") or "")
+            code = media.get("code") or media.get("shortcode") or ""
+            cap = media.get("caption") or {}
+            posts.append({
+                "media_id": pk,
+                "shortcode": code,
+                "media_type": media.get("media_type", 1),
+                "username": (media.get("user") or {}).get("username", ""),
+                "caption": cap.get("text", "") if isinstance(cap, dict) else str(cap or ""),
+                "like_count": media.get("like_count", 0),
+                "taken_at": media.get("taken_at", 0),
+            })
+        return {
+            "posts": posts,
+            "count": len(posts),
+            "next_max_id": body.get("next_max_id", ""),
+            "more_available": body.get("more_available", False),
+        }
+
+    async def liked_posts(self, limit: int = 20, cursor: Optional[str] = None) -> Dict[str, Any]:
+        """Get posts you have liked."""
+        cm = self._cookie_manager
+        if not cm or not getattr(cm, "is_authenticated", False):
+            raise FetchError("liked_posts requires authentication.")
+        session = await self._get_auth_session()
+        csrf = (cm.cookies.get("csrftoken", "")) or ""
+        params: Dict[str, str] = {"count": str(min(limit, 50))}
+        if cursor:
+            params["max_id"] = cursor
+        resp = await session.get(
+            "https://www.instagram.com/api/v1/feed/liked/",
+            params=params,
+            headers={"x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id,
+                     "User-Agent": "Instagram 317.0.0.24.109 Android (31/12; 420dpi; 1080x2170; Google; Pixel 5; redfin; qcom; en_US; 558903590)"},
+        )
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"liked_posts: HTTP {resp.status_code}: {resp.text[:200]}")
+        try:
+            body = resp.json()
+        except Exception:
+            raise FetchError(f"liked_posts: invalid JSON: {resp.text[:200]}")
+        items_raw = body.get("items") or []
+        posts = []
+        for item in items_raw[:limit]:
+            pk = str(item.get("pk") or item.get("id") or "")
+            code = item.get("code") or item.get("shortcode") or ""
+            cap = item.get("caption") or {}
+            posts.append({
+                "media_id": pk,
+                "shortcode": code,
+                "media_type": item.get("media_type", 1),
+                "username": (item.get("user") or {}).get("username", ""),
+                "caption": cap.get("text", "") if isinstance(cap, dict) else str(cap or ""),
+                "like_count": item.get("like_count", 0),
+                "taken_at": item.get("taken_at", 0),
+            })
+        return {
+            "posts": posts,
+            "count": len(posts),
+            "next_max_id": body.get("next_max_id", ""),
+            "more_available": body.get("more_available", False),
+        }
+
+    async def activity_feed(self, limit: int = 30) -> Dict[str, Any]:
+        """Get your Instagram notification/activity feed."""
+        cm, session, csrf = await self._require_auth("activity_feed")
+        # www.instagram.com/news/inbox returns 500; i.instagram.com with mobile UA works
+        mobile_ua = (
+            "Instagram 317.0.0.24.109 Android "
+            "(31/12; 420dpi; 1080x2170; Google; Pixel 5; redfin; qcom; en_US; 558903590)"
+        )
+        hdrs = {
+            "x-csrftoken": csrf,
+            "x-ig-app-id": self._config.ig_app_id_mobile,
+            "User-Agent": mobile_ua,
+            "accept": "application/json, */*",
+            "Cookie": self._cookie_str(),
+        }
+        resp = await session.get(
+            "https://i.instagram.com/api/v1/news/inbox/",
+            headers=hdrs,
+            allow_redirects=False,
+        )
+        body_text = resp.text
+        if resp.status_code not in (200, 201):
+            raise FetchError(f"activity_feed: HTTP {resp.status_code}: {body_text[:200]}")
+        if body_text.lstrip().startswith("<"):
+            raise FetchError(f"activity_feed: got HTML (session blocked)")
+        try:
+            body = _json.loads(body_text)
+        except Exception:
+            raise FetchError(f"activity_feed: invalid JSON: {body_text[:200]}")
+        _story_type_map = {
+            1: "like", 2: "comment", 3: "follow", 4: "mention",
+            5: "tagged", 10: "comment_like", 12: "new_follower",
+        }
+        notifications = []
+        for key in ("new_stories", "old_stories"):
+            for story in (body.get(key) or []):
+                stype = story.get("story_type", 0)
+                user = (story.get("args") or {}).get("profile_id") or ""
+                text = (story.get("args") or {}).get("text") or ""
+                ts = story.get("timestamp", 0)
+                notifications.append({
+                    "type": _story_type_map.get(stype, f"type_{stype}"),
+                    "user_id": str(user),
+                    "text": text[:200],
+                    "timestamp": ts,
+                })
+        notifications = notifications[:limit]
+        return {"notifications": notifications, "count": len(notifications)}
+
+    async def compare_followers(self, analysis_type: str = "both", max_users: int = 500) -> Dict[str, Any]:
+        """Compare followers vs following to find unfollowers and fans."""
+        cm, session, csrf = await self._require_auth("compare_followers")
+        my_user_id = (cm.cookies.get("ds_user_id", "") if cm else "") or ""
+        if not my_user_id:
+            raise FetchError("compare_followers: cannot determine logged-in user_id from cookies")
+
+        async def _fetch_all(endpoint: str) -> Set[str]:
+            users: Set[str] = set()
+            max_id = ""
+            while len(users) < max_users:
+                params: Dict[str, str] = {"count": "100"}
+                if max_id:
+                    params["max_id"] = max_id
+                body = await self._auth_get(
+                    f"https://www.instagram.com/api/v1/friendships/{my_user_id}/{endpoint}/",
+                    params, csrf, session, "compare_followers",
+                )
+                page = body.get("users") or []
+                for u in page:
+                    users.add(str(u.get("pk") or u.get("id") or ""))
+                max_id = body.get("next_max_id", "")
+                if not max_id or not page:
+                    break
+            return users
+
+        follower_ids = await _fetch_all("followers") if analysis_type in ("both", "fans") else set()
+        following_ids = await _fetch_all("following") if analysis_type in ("both", "unfollowers") else set()
+
+        result: Dict[str, Any] = {}
+        if analysis_type in ("both", "unfollowers"):
+            unfollowers = following_ids - follower_ids
+            result["unfollowers"] = sorted(unfollowers)
+            result["unfollower_count"] = len(unfollowers)
+        if analysis_type in ("both", "fans"):
+            fans = follower_ids - following_ids
+            result["fans"] = sorted(fans)
+            result["fan_count"] = len(fans)
+        return result
+
+    async def user_id_lookup(self, value: str, lookup_type: str = "auto") -> Dict[str, Any]:
+        """Bidirectional lookup: username → user_id or user_id → username."""
+        cm = self._cookie_manager
+        if not cm or not getattr(cm, "is_authenticated", False):
+            raise FetchError("user_id_lookup requires authentication.")
+        session = await self._get_auth_session()
+        csrf = (cm.cookies.get("csrftoken", "")) or ""
+        value = value.strip().lstrip("@")
+        mobile_ua = "Instagram 317.0.0.24.109 Android (31/12; 420dpi; 1080x2170; Google; Pixel 5; redfin; qcom; en_US; 558903590)"
+
+        if lookup_type == "auto":
+            lookup_type = "id_to_username" if value.isdigit() else "username_to_id"
+
+        if lookup_type == "username_to_id":
+            resp = await session.get(
+                f"https://www.instagram.com/api/v1/users/{value}/usernameinfo/",
+                headers={"x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id, "User-Agent": mobile_ua},
+            )
+            if resp.status_code not in (200, 201):
+                raise FetchError(f"user_id_lookup: HTTP {resp.status_code}: {resp.text[:200]}")
+            try:
+                body = resp.json()
+            except Exception:
+                raise FetchError(f"user_id_lookup: invalid JSON: {resp.text[:200]}")
+            user = body.get("user") or {}
+            return {
+                "input": value,
+                "username": user.get("username", value),
+                "user_id": str(user.get("pk") or user.get("id") or ""),
+                "full_name": user.get("full_name", ""),
+                "is_private": user.get("is_private", False),
+                "is_verified": user.get("is_verified", False),
+            }
+        else:
+            resp = await session.get(
+                f"https://www.instagram.com/api/v1/users/{value}/info/",
+                headers={"x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id, "User-Agent": mobile_ua},
+            )
+            if resp.status_code not in (200, 201):
+                raise FetchError(f"user_id_lookup: HTTP {resp.status_code}: {resp.text[:200]}")
+            try:
+                body = resp.json()
+            except Exception:
+                raise FetchError(f"user_id_lookup: invalid JSON: {resp.text[:200]}")
+            user = body.get("user") or {}
+            return {
+                "input": value,
+                "username": user.get("username", ""),
+                "user_id": str(user.get("pk") or user.get("id") or value),
+                "full_name": user.get("full_name", ""),
+                "is_private": user.get("is_private", False),
+                "is_verified": user.get("is_verified", False),
+            }
+
     async def post_comment(self, media_id: str, text: str) -> Dict[str, Any]:
         """Post a comment on an Instagram post."""
         cm = self._cookie_manager
@@ -5064,14 +5948,11 @@ class InstagramClient:
             m = _re.search(pattern, html)
             return m.group(1) if m else default
 
-        # pk is right before username in the JSON
-        pk = _extract(r'"pk":"(\d+)","username":"' + _re.escape(username) + '"', "")
+        # pk may have 1-2 fields between it and "username" in the Threads HTML
+        pk = _extract(r'"pk":"(\d+)"[^}]{0,120}"username":"' + _re.escape(username) + '"', "")
         if not pk:
-            # Try reverse: find username then look back for pk
-            m_pk = _re.search(
-                r'"has_onboarded_to_text_post_app":[^,]+,"pk":"(\d+)",[^,]*"username":"' + _re.escape(username) + '"',
-                html
-            )
+            # Fallback: find "username":"natgeo" and look backwards for nearest pk
+            m_pk = _re.search(r'"pk":"(\d+)"[^{]*?"username":"' + _re.escape(username) + '"', html)
             pk = m_pk.group(1) if m_pk else ""
 
         followers = int(_extract(r'"username":"' + _re.escape(username) + r'"[^}]{0,300}"follower_count":(\d+)', 0))

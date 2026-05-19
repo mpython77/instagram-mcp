@@ -8,10 +8,11 @@ from instagram_mcp.config import MCPConfig, _load_proxy_file
 
 def test_mcp_config_defaults():
     cfg = MCPConfig()
-    assert cfg.ig_app_id == "936619743392459"
+    assert cfg.ig_app_id == "1217981644879628"
+    assert cfg.ig_app_id_mobile == "936619743392459"
     assert "chrome" in cfg.ig_impersonate
     assert "x-ig-app-id" in cfg.ig_headers
-    assert cfg.ig_headers["x-ig-app-id"] == "936619743392459"
+    assert cfg.ig_headers["x-ig-app-id"] == "1217981644879628"
     assert "User-Agent" in cfg.ig_headers
 
 @mock.patch.dict(os.environ, {

@@ -48,7 +48,8 @@ class MCPConfig:
     ig_endpoint: str = (
         "https://i.instagram.com/api/v1/users/web_profile_info/?username={}"
     )
-    ig_app_id: str = "936619743392459"
+    ig_app_id: str = "1217981644879628"   # web app ID (www.instagram.com)
+    ig_app_id_mobile: str = "936619743392459"  # mobile app ID (i.instagram.com)
     ig_impersonate: str = "chrome142"
     ig_user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "

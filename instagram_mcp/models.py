@@ -1927,3 +1927,175 @@ class CaptionAnalyzeInput(BaseModel):
     @classmethod
     def clean_username(cls, v: str) -> str:
         return _clean_username(v)
+
+
+# ── P1: New DM Tools ──────────────────────────────────────────────────────────
+
+class DMSendPhotoInput(BaseModel):
+    """Input for instagram_dm_send_photo tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    photo_path: str = Field(..., description="Absolute local path to JPEG/PNG image file.", min_length=1)
+    username: Optional[str] = Field(default=None, description="Recipient username (resolves thread automatically).")
+    thread_id: Optional[str] = Field(default=None, description="Existing thread ID from instagram_dm_inbox.")
+    caption: str = Field(default="", description="Optional caption text.")
+
+
+class DMSendVideoInput(BaseModel):
+    """Input for instagram_dm_send_video tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    video_path: str = Field(..., description="Absolute local path to MP4 video file.", min_length=1)
+    username: Optional[str] = Field(default=None, description="Recipient username.")
+    thread_id: Optional[str] = Field(default=None, description="Existing thread ID.")
+    thumbnail_path: Optional[str] = Field(default=None, description="Optional cover image path (JPEG/PNG).")
+
+
+class DMMuteInput(BaseModel):
+    """Input for instagram_dm_mute tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    thread_id: str = Field(..., description="Thread ID from instagram_dm_inbox.", min_length=1)
+    mute: bool = Field(default=True, description="True to mute, False to unmute.")
+
+
+class DMSharePostInput(BaseModel):
+    """Input for instagram_dm_share_post tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    media_id: str = Field(..., description="Numeric media_id of the post to share.", min_length=1)
+    thread_id: Optional[str] = Field(default=None, description="Target thread ID.")
+    username: Optional[str] = Field(default=None, description="Target username (resolves thread automatically).")
+    text: str = Field(default="", description="Optional text message to accompany the share.")
+
+
+class DMMediaMessagesInput(BaseModel):
+    """Input for instagram_dm_media_messages tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    thread_id: str = Field(..., description="Thread ID.", min_length=1)
+    limit: int = Field(default=50, ge=1, le=200, description="Max messages to scan (1-200).")
+
+
+# ── P2: Comment Tools ─────────────────────────────────────────────────────────
+
+class CommentReplyInput(BaseModel):
+    """Input for instagram_comment_reply tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    media_id: str = Field(..., description="Numeric media_id of the post (from instagram_post).", min_length=1)
+    comment_id: str = Field(..., description="Numeric comment_id to reply to (from instagram_post_comments).", min_length=1)
+    text: str = Field(..., description="Reply text (max 2200 chars).", min_length=1, max_length=2200)
+
+
+class CommentLikeInput(BaseModel):
+    """Input for instagram_comment_like tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    comment_id: str = Field(..., description="Numeric comment_id to like or unlike.", min_length=1)
+    action: str = Field(default="like", description="'like' or 'unlike'.")
+
+
+class CommentHideInput(BaseModel):
+    """Input for instagram_comment_hide tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    comment_id: str = Field(..., description="Numeric comment_id to hide or unhide.", min_length=1)
+    hide: bool = Field(default=True, description="True to hide, False to unhide.")
+
+
+# ── P3: Post Management Tools ─────────────────────────────────────────────────
+
+class PostDeleteInput(BaseModel):
+    """Input for instagram_post_delete tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    media_id: str = Field(..., description="Numeric media_id of your post to delete.", min_length=1)
+
+
+class ToggleCommentsInput(BaseModel):
+    """Input for instagram_toggle_comments tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    media_id: str = Field(..., description="Numeric media_id of your post.", min_length=1)
+    enabled: bool = Field(default=True, description="True to enable comments, False to disable.")
+
+
+class MediaInsightsInput(BaseModel):
+    """Input for instagram_media_insights tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    media_id: str = Field(..., description="Numeric media_id of your post.", min_length=1)
+
+
+class UploadVideoInput(BaseModel):
+    """Input for instagram_upload_video tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    video_path: str = Field(..., description="Absolute local path to MP4 video file.", min_length=1)
+    caption: str = Field(default="", description="Post caption (max 2200 chars).", max_length=2200)
+    cover_path: Optional[str] = Field(default=None, description="Optional thumbnail image path.")
+    disable_comments: bool = Field(default=False, description="Disable comments on this post.")
+    hide_like_count: bool = Field(default=False, description="Hide like count from viewers.")
+
+
+# ── P4: Account & Feed Tools ──────────────────────────────────────────────────
+
+class AccountPrivacyInput(BaseModel):
+    """Input for instagram_account_privacy tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    is_private: bool = Field(..., description="True for private account, False for public.")
+
+
+class HomeFeedInput(BaseModel):
+    """Input for instagram_home_feed tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    limit: int = Field(default=20, ge=1, le=50, description="Max posts to return (1-50).")
+    cursor: Optional[str] = Field(default=None, description="Pagination cursor from previous call's next_max_id.")
+
+
+class SavedPostsInput(BaseModel):
+    """Input for instagram_saved_posts tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    limit: int = Field(default=20, ge=1, le=50, description="Max posts to return (1-50).")
+    cursor: Optional[str] = Field(default=None, description="Pagination cursor.")
+
+
+class LikedPostsInput(BaseModel):
+    """Input for instagram_liked_posts tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    limit: int = Field(default=20, ge=1, le=50, description="Max posts to return (1-50).")
+    cursor: Optional[str] = Field(default=None, description="Pagination cursor.")
+
+
+class ActivityFeedInput(BaseModel):
+    """Input for instagram_activity_feed tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    limit: int = Field(default=30, ge=1, le=100, description="Max notifications to return (1-100).")
+
+
+class CompareFollowersInput(BaseModel):
+    """Input for instagram_compare_followers tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    analysis_type: str = Field(
+        default="both",
+        description="What to compute: 'unfollowers' (you follow, they don't), 'fans' (they follow, you don't), or 'both'.",
+    )
+    max_users: int = Field(default=500, ge=1, le=2000, description="Max users to fetch per list (1-2000).")
+
+
+class UserIdLookupInput(BaseModel):
+    """Input for instagram_user_id_lookup tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    value: str = Field(..., description="Username or numeric user_id to look up.", min_length=1)
+    lookup_type: str = Field(
+        default="auto",
+        description="'username_to_id', 'id_to_username', or 'auto' (detects based on input).",
+    )

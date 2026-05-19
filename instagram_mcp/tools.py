@@ -165,6 +165,25 @@ from .models import (
     MonitorInput,
     OAuthInput,
     SessionInput,
+    DMSendPhotoInput,
+    DMSendVideoInput,
+    DMMuteInput,
+    DMSharePostInput,
+    DMMediaMessagesInput,
+    CommentReplyInput,
+    CommentLikeInput,
+    CommentHideInput,
+    PostDeleteInput,
+    ToggleCommentsInput,
+    MediaInsightsInput,
+    UploadVideoInput,
+    AccountPrivacyInput,
+    HomeFeedInput,
+    SavedPostsInput,
+    LikedPostsInput,
+    ActivityFeedInput,
+    CompareFollowersInput,
+    UserIdLookupInput,
 )
 from .parser import (
     check_dead_account,
@@ -4512,6 +4531,772 @@ def register_tools(
                     )
             except ToolError:
                 raise
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # P1: DM SEND PHOTO
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_dm_send_photo",
+            annotations={
+                "title": "Instagram DM Send Photo",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_dm_send_photo(params: DMSendPhotoInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Send a photo as a Direct Message.
+
+            Provide either username or thread_id. The photo is uploaded and sent
+            to the DM thread immediately.
+
+            Args:
+                params: photo_path (local file), username or thread_id, optional caption
+            """
+            await ctx.info(f"instagram_dm_send_photo: target={params.username or params.thread_id}")
+            if not params.username and not params.thread_id:
+                raise _tool_error("Provide either username or thread_id", "validation_error")
+            try:
+                data = await client.dm_send_photo(
+                    params.photo_path,
+                    thread_id=params.thread_id,
+                    username=params.username,
+                    caption=params.caption,
+                )
+                target = params.username or params.thread_id
+                return f"✅ Photo sent to {target}\nItem ID: {data.get('item_id', '')}"
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # P1: DM SEND VIDEO
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_dm_send_video",
+            annotations={
+                "title": "Instagram DM Send Video",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_dm_send_video(params: DMSendVideoInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Send a video file as a Direct Message.
+
+            Uploads the video and sends it to the specified DM thread or user.
+
+            Args:
+                params: video_path (local MP4), username or thread_id, optional thumbnail_path
+            """
+            await ctx.info(f"instagram_dm_send_video: target={params.username or params.thread_id}")
+            if not params.username and not params.thread_id:
+                raise _tool_error("Provide either username or thread_id", "validation_error")
+            try:
+                data = await client.dm_send_video(
+                    params.video_path,
+                    thread_id=params.thread_id,
+                    username=params.username,
+                    thumbnail_path=params.thumbnail_path,
+                )
+                target = params.username or params.thread_id
+                return f"✅ Video sent to {target}\nItem ID: {data.get('item_id', '')}"
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # P1: DM MUTE
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_dm_mute",
+            annotations={
+                "title": "Instagram DM Mute",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_dm_mute(params: DMMuteInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Mute or unmute a DM thread.
+
+            Muted threads still receive messages but without push notifications.
+
+            Args:
+                params: thread_id, mute (True=mute, False=unmute)
+            """
+            action = "mute" if params.mute else "unmute"
+            await ctx.info(f"instagram_dm_mute: {action} thread={params.thread_id}")
+            try:
+                data = await client.dm_mute(params.thread_id, params.mute)
+                return f"✅ Thread {data['status']}: `{params.thread_id}`"
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # P1: DM SHARE POST
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_dm_share_post",
+            annotations={
+                "title": "Instagram DM Share Post",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_dm_share_post(params: DMSharePostInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Share an Instagram post to a DM thread or user.
+
+            Sends the post as a DM item with a preview card. Get media_id from
+            instagram_post tool.
+
+            Args:
+                params: media_id, thread_id or username, optional text
+            """
+            await ctx.info(f"instagram_dm_share_post: media={params.media_id}")
+            if not params.username and not params.thread_id:
+                raise _tool_error("Provide either username or thread_id", "validation_error")
+            try:
+                data = await client.dm_share_post(
+                    params.media_id,
+                    thread_id=params.thread_id,
+                    username=params.username,
+                    text=params.text,
+                )
+                target = params.username or params.thread_id
+                return (
+                    f"✅ Post {data['media_id']} shared to {target}\n"
+                    f"Item ID: {data.get('item_id', '')}"
+                )
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # P1: DM MEDIA MESSAGES
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_dm_media_messages",
+            annotations={
+                "title": "Instagram DM Media Messages",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_dm_media_messages(params: DMMediaMessagesInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — List all media messages in a DM thread.
+
+            Filters a thread's messages to show only photos, videos, shared posts,
+            reels, and other media items — skipping plain text messages.
+
+            Args:
+                params: thread_id, limit (1-200, messages to scan)
+            """
+            await ctx.info(f"instagram_dm_media_messages: thread={params.thread_id} limit={params.limit}")
+            try:
+                media_msgs = await client.dm_media_messages(params.thread_id, params.limit)
+                if not media_msgs:
+                    return f"No media messages found in thread `{params.thread_id}`."
+                lines = [f"## Media messages in thread `{params.thread_id}` — {len(media_msgs)} found\n"]
+                for m in media_msgs:
+                    ts = m.get("timestamp", 0)
+                    from datetime import datetime, timezone
+                    dt = datetime.fromtimestamp(int(str(ts)[:10]), tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+                    lines.append(
+                        f"- [{dt}] **{m.get('sender', '?')}** — type: `{m.get('type', '?')}` "
+                        f"| id: `{m.get('item_id', '')[:20]}...`"
+                    )
+                return "\n".join(lines)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # P2: COMMENT REPLY
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_comment_reply",
+            annotations={
+                "title": "Instagram Comment Reply",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_comment_reply(params: CommentReplyInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Reply to a specific comment on an Instagram post.
+
+            Creates a threaded reply under the target comment. Get comment_id from
+            instagram_post_comments tool.
+
+            Args:
+                params: media_id (post), comment_id (to reply to), text
+            """
+            await ctx.info(f"instagram_comment_reply: media={params.media_id} comment={params.comment_id}")
+            try:
+                data = await client.comment_reply(params.media_id, params.comment_id, params.text)
+                return (
+                    f"✅ Reply posted on post {data['media_id']}\n"
+                    f"Reply ID: {data['comment_id']}\n"
+                    f"Reply to: {data['replied_to']}\n"
+                    f"Text: {data['text']}"
+                )
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # P2: COMMENT LIKE
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_comment_like",
+            annotations={
+                "title": "Instagram Comment Like",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_comment_like(params: CommentLikeInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Like or unlike a comment on an Instagram post.
+
+            Args:
+                params: comment_id, action ('like' or 'unlike')
+            """
+            await ctx.info(f"instagram_comment_like: comment={params.comment_id} action={params.action}")
+            try:
+                data = await client.comment_like(params.comment_id, params.action)
+                return f"✅ Comment {data['status']}: `{data['comment_id']}`"
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # P2: COMMENT HIDE
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_comment_hide",
+            annotations={
+                "title": "Instagram Comment Hide",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_comment_hide(params: CommentHideInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Hide or unhide a comment on your Instagram post.
+
+            Hidden comments remain visible to the commenter but not to the public.
+            Requires you to own the post.
+
+            Args:
+                params: comment_id, hide (True=hide, False=unhide)
+            """
+            action = "hide" if params.hide else "unhide"
+            await ctx.info(f"instagram_comment_hide: {action} comment={params.comment_id}")
+            try:
+                data = await client.comment_hide(params.comment_id, params.hide)
+                return f"✅ Comment {data['status']}: `{data['comment_id']}`"
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # P3: POST DELETE
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_post_delete",
+            annotations={
+                "title": "Instagram Post Delete",
+                "readOnlyHint": False,
+                "destructiveHint": True,
+                "idempotentHint": False,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_post_delete(params: PostDeleteInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Permanently delete one of your own Instagram posts.
+
+            ⚠️ This action is irreversible. The post cannot be recovered.
+
+            Args:
+                params: media_id (numeric, from instagram_post or instagram_feed_deep)
+            """
+            await ctx.info(f"instagram_post_delete: media={params.media_id}")
+            try:
+                data = await client.post_delete(params.media_id)
+                return f"✅ Post permanently deleted: `{data['media_id']}`"
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # P3: TOGGLE COMMENTS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_toggle_comments",
+            annotations={
+                "title": "Instagram Toggle Comments",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_toggle_comments(params: ToggleCommentsInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Enable or disable comments on one of your posts.
+
+            Args:
+                params: media_id (numeric), enabled (True=enable, False=disable)
+            """
+            action = "enable" if params.enabled else "disable"
+            await ctx.info(f"instagram_toggle_comments: {action} media={params.media_id}")
+            try:
+                data = await client.toggle_comments(params.media_id, params.enabled)
+                return f"✅ Comments {data['status']} on post `{data['media_id']}`"
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # P3: MEDIA INSIGHTS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("analysis", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_media_insights",
+            annotations={
+                "title": "Instagram Media Insights",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_media_insights(params: MediaInsightsInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Get performance insights for one of your own posts.
+
+            Returns reach, impressions, saves, shares, and profile visits.
+            Requires a Business or Creator account for full metrics.
+
+            Args:
+                params: media_id (numeric, from instagram_post)
+            """
+            await ctx.info(f"instagram_media_insights: media={params.media_id}")
+            try:
+                data = await client.media_insights(params.media_id)
+                insights = data.get("insights", {})
+                if not insights:
+                    return f"No insights available for media `{params.media_id}`. Requires Business/Creator account."
+                lines = [f"## Post Insights: `{params.media_id}`\n"]
+                metric_names = {
+                    "reach": "Reach", "impressions": "Impressions", "saved": "Saves",
+                    "shares": "Shares", "likes": "Likes", "comments": "Comments",
+                    "profile_visits": "Profile visits", "plays": "Video plays",
+                }
+                for key, label in metric_names.items():
+                    if key in insights:
+                        lines.append(f"- **{label}**: {insights[key]:,}")
+                return "\n".join(lines)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # P3: UPLOAD VIDEO (feed post, not reel)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("upload", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_upload_video",
+            annotations={
+                "title": "Instagram Upload Video",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_upload_video(params: UploadVideoInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Upload a video as a regular Instagram feed post.
+
+            For Reels (vertical short-form), use instagram_upload_reel instead.
+            Supports MP4 videos up to 60 seconds for feed posts.
+
+            Args:
+                params: video_path (local MP4), caption, optional cover_path,
+                        disable_comments, hide_like_count
+            """
+            await ctx.info(f"instagram_upload_video: path={params.video_path}")
+            try:
+                await ctx.report_progress(0, 3, "Uploading video...")
+                data = await client.upload_video_feed(
+                    params.video_path,
+                    caption=params.caption,
+                    cover_path=params.cover_path,
+                    disable_comments=params.disable_comments,
+                    hide_like_count=params.hide_like_count,
+                )
+                await ctx.report_progress(3, 3, "Published")
+                shortcode = data.get("shortcode", "")
+                media_id = data.get("media_id", "")
+                url = f"https://www.instagram.com/p/{shortcode}/" if shortcode else ""
+                return format_upload_result_markdown(
+                    "video feed post",
+                    shortcode=shortcode,
+                    media_id=media_id,
+                    url=url,
+                    caption=params.caption,
+                )
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # P4: ACCOUNT PRIVACY
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_account_privacy",
+            annotations={
+                "title": "Instagram Account Privacy",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_account_privacy(params: AccountPrivacyInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Toggle your account between private and public mode.
+
+            Private accounts require approval before new followers can see your content.
+
+            Args:
+                params: is_private (True=private, False=public)
+            """
+            mode = "private" if params.is_private else "public"
+            await ctx.info(f"instagram_account_privacy: set to {mode}")
+            try:
+                data = await client.account_privacy(params.is_private)
+                return f"✅ Account is now **{data['status']}**"
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # P4: HOME FEED
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("content", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_home_feed",
+            annotations={
+                "title": "Instagram Home Feed",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_home_feed(params: HomeFeedInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Get your Instagram home timeline.
+
+            Returns posts from accounts you follow in reverse chronological order.
+
+            Args:
+                params: limit (1-50), optional cursor for pagination
+            """
+            await ctx.info(f"instagram_home_feed: limit={params.limit}")
+            try:
+                data = await client.home_feed(params.limit, params.cursor)
+                posts = data["posts"]
+                if not posts:
+                    return "No posts found in your home feed."
+                lines = [f"## Home Feed — {data['count']} posts\n"]
+                for p in posts:
+                    from datetime import datetime, timezone
+                    dt = datetime.fromtimestamp(p.get("taken_at", 0), tz=timezone.utc).strftime("%Y-%m-%d %H:%M") if p.get("taken_at") else "?"
+                    cap = (p.get("caption") or "")[:80]
+                    lines.append(
+                        f"- **@{p['username']}** | {dt} | ❤ {p.get('like_count', 0):,}\n"
+                        f"  [{p.get('shortcode', p.get('media_id', ''))}] {cap}"
+                    )
+                if data.get("more_available") and data.get("next_max_id"):
+                    lines.append(f"\n_More available. cursor: `{data['next_max_id']}`_")
+                return "\n".join(lines)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # P4: SAVED POSTS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("content", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_saved_posts",
+            annotations={
+                "title": "Instagram Saved Posts",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_saved_posts(params: SavedPostsInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Get your saved/bookmarked Instagram posts.
+
+            Returns posts you have saved using instagram_post_save.
+
+            Args:
+                params: limit (1-50), optional cursor for pagination
+            """
+            await ctx.info(f"instagram_saved_posts: limit={params.limit}")
+            try:
+                data = await client.saved_posts(params.limit, params.cursor)
+                posts = data["posts"]
+                if not posts:
+                    return "No saved posts found."
+                lines = [f"## Saved Posts — {data['count']}\n"]
+                for p in posts:
+                    cap = (p.get("caption") or "")[:80]
+                    lines.append(
+                        f"- **@{p['username']}** — [{p.get('shortcode', p.get('media_id', ''))}] {cap}"
+                    )
+                if data.get("more_available") and data.get("next_max_id"):
+                    lines.append(f"\n_More available. cursor: `{data['next_max_id']}`_")
+                return "\n".join(lines)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # P4: LIKED POSTS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("content", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_liked_posts",
+            annotations={
+                "title": "Instagram Liked Posts",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_liked_posts(params: LikedPostsInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Get posts you have liked.
+
+            Returns your personal liked media history.
+
+            Args:
+                params: limit (1-50), optional cursor for pagination
+            """
+            await ctx.info(f"instagram_liked_posts: limit={params.limit}")
+            try:
+                data = await client.liked_posts(params.limit, params.cursor)
+                posts = data["posts"]
+                if not posts:
+                    return "No liked posts found."
+                lines = [f"## Liked Posts — {data['count']}\n"]
+                for p in posts:
+                    cap = (p.get("caption") or "")[:80]
+                    lines.append(
+                        f"- **@{p['username']}** — [{p.get('shortcode', p.get('media_id', ''))}] {cap}"
+                    )
+                if data.get("more_available") and data.get("next_max_id"):
+                    lines.append(f"\n_More available. cursor: `{data['next_max_id']}`_")
+                return "\n".join(lines)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # P4: ACTIVITY FEED
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("analysis", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_activity_feed",
+            annotations={
+                "title": "Instagram Activity Feed",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_activity_feed(params: ActivityFeedInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Get your Instagram notification/activity feed.
+
+            Returns likes, comments, follows, and mentions on your posts.
+
+            Args:
+                params: limit (1-100, default 30)
+            """
+            await ctx.info(f"instagram_activity_feed: limit={params.limit}")
+            try:
+                data = await client.activity_feed(params.limit)
+                notifications = data["notifications"]
+                if not notifications:
+                    return "No recent activity."
+                lines = [f"## Activity Feed — {data['count']} notifications\n"]
+                for n in notifications:
+                    from datetime import datetime, timezone
+                    ts = n.get("timestamp", 0)
+                    dt = datetime.fromtimestamp(int(str(ts)[:10]), tz=timezone.utc).strftime("%Y-%m-%d %H:%M") if ts else "?"
+                    text = n.get("text", "")[:100]
+                    lines.append(f"- [{dt}] **{n['type']}** (user: {n['user_id']}) — {text}")
+                return "\n".join(lines)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # P4: COMPARE FOLLOWERS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("analysis", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_compare_followers",
+            annotations={
+                "title": "Instagram Compare Followers",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_compare_followers(params: CompareFollowersInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Compare your followers and following lists.
+
+            Finds:
+            - Unfollowers: accounts you follow who don't follow you back
+            - Fans: accounts who follow you but you don't follow back
+
+            Args:
+                params: analysis_type ('unfollowers', 'fans', or 'both'), max_users (1-2000)
+            """
+            await ctx.info(f"instagram_compare_followers: type={params.analysis_type} max={params.max_users}")
+            valid_types = ("unfollowers", "fans", "both")
+            if params.analysis_type not in valid_types:
+                raise _tool_error(f"analysis_type must be one of: {valid_types}", "validation_error")
+            try:
+                await ctx.report_progress(0, 2, "Fetching follower/following lists...")
+                data = await client.compare_followers(params.analysis_type, params.max_users)
+                await ctx.report_progress(2, 2, "Done")
+                lines = [f"## Follower Comparison\n"]
+                if "unfollower_count" in data:
+                    ids = data.get("unfollowers", [])
+                    lines.append(f"### Unfollowers ({data['unfollower_count']})")
+                    lines.append("_(You follow them, they don't follow back)_")
+                    for uid in ids[:50]:
+                        lines.append(f"- user_id: `{uid}`")
+                    if len(ids) > 50:
+                        lines.append(f"_...and {len(ids) - 50} more_")
+                if "fan_count" in data:
+                    ids = data.get("fans", [])
+                    lines.append(f"\n### Fans ({data['fan_count']})")
+                    lines.append("_(They follow you, you don't follow back)_")
+                    for uid in ids[:50]:
+                        lines.append(f"- user_id: `{uid}`")
+                    if len(ids) > 50:
+                        lines.append(f"_...and {len(ids) - 50} more_")
+                return "\n".join(lines)
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # P4: USER ID LOOKUP
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if _enabled("social_graph", requires_auth=True):
+
+        @mcp.tool(
+            name="instagram_user_id_lookup",
+            annotations={
+                "title": "Instagram User ID Lookup",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
+        async def instagram_user_id_lookup(params: UserIdLookupInput, ctx: Context) -> str:
+            """
+            🔐 AUTH REQUIRED — Bidirectional lookup: username → user_id or user_id → username.
+
+            Useful for converting between the two formats required by different tools.
+            Auto-detects lookup direction based on input (numeric = ID, text = username).
+
+            Args:
+                params: value (username or user_id), lookup_type ('auto', 'username_to_id', 'id_to_username')
+            """
+            await ctx.info(f"instagram_user_id_lookup: value={params.value} type={params.lookup_type}")
+            try:
+                data = await client.user_id_lookup(params.value, params.lookup_type)
+                verified = " ✓" if data.get("is_verified") else ""
+                private = " 🔒" if data.get("is_private") else ""
+                return (
+                    f"## User Lookup: `{params.value}`\n"
+                    f"- Username: **@{data['username']}**{verified}{private}\n"
+                    f"- User ID: `{data['user_id']}`\n"
+                    f"- Full name: {data.get('full_name', '')}"
+                )
             except Exception as e:
                 raise _exception_to_tool_error(e)
 

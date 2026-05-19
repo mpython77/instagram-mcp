@@ -753,10 +753,12 @@ def run_server() -> None:
     mcp = create_mcp_server()
 
     if _is_http_transport():
-        host = os.environ.get("INSTAGRAM_MCP_HOST", "0.0.0.0")
-        port = int(os.environ.get("INSTAGRAM_MCP_PORT", "8000"))
+        import uvicorn
+        host = os.environ.get("INSTAGRAM_MCP_HOST", "127.0.0.1")
+        port = int(os.environ.get("INSTAGRAM_MCP_PORT", "8765"))
         logger.info("Starting HTTP transport on %s:%d", host, port)
-        mcp.run(transport="streamable-http", host=host, port=port)
+        app = mcp.streamable_http_app()
+        uvicorn.run(app, host=host, port=port)
     else:
         mcp.run(transport="stdio")
 
