@@ -1149,3 +1149,81 @@ async def test_caption_analyze_fetches_more_pages(client):
         result = await client.caption_analyze("testuser", max_posts=10)
         assert result["posts_analyzed"] == 2
         mock_feed.assert_called_once()
+
+
+# ── Bug-fix regression tests ───────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_edit_profile_first_name_whitespace_no_index_error(client):
+    """edit_profile must not raise IndexError when full_name is whitespace-only."""
+    mock_info_resp = MagicMock()
+    mock_info_resp.status_code = 200
+    mock_info_resp.json.return_value = {"user": {"biography": "bio", "full_name": "  ", "external_url": "", "email": "", "phone_number": "", "username": "testuser"}}
+    mock_post_resp = MagicMock()
+    mock_post_resp.status_code = 200
+    mock_post_resp.text = '{"status":"ok","user":{"pk":"1","username":"testuser","biography":"bio","full_name":"","external_url":"","is_private":false}}'
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.get = AsyncMock(return_value=mock_info_resp)
+        mock_session.post = AsyncMock(return_value=mock_post_resp)
+        # Must not raise IndexError — whitespace-only full_name → first_name=""
+        result = await client.edit_profile(biography="new bio")
+        assert result["status"] == "updated"
+
+
+@pytest.mark.asyncio
+async def test_dm_send_photo_redirected(client):
+    """dm_send_photo must raise FetchError on 302 (not silently follow redirect)."""
+    mock_upload_resp = MagicMock()
+    mock_upload_resp.status_code = 302
+    mock_upload_resp.text = ""
+    with patch.object(client, "_require_auth", new_callable=AsyncMock) as mock_auth, \
+         patch.object(client, "_upload_single_image", new_callable=AsyncMock) as mock_up, \
+         patch("os.path.isfile", return_value=True):
+        mock_cm = MagicMock()
+        mock_cm.cookies = {"ds_user_id": "123", "ig_did": "abc", "csrftoken": "tok"}
+        mock_session = MagicMock()
+        mock_session.post = AsyncMock(return_value=mock_upload_resp)
+        mock_auth.return_value = (mock_cm, mock_session, "tok")
+        mock_up.return_value = ("upload_id_123", 640, 480)
+        with pytest.raises(FetchError, match="redirected"):
+            await client.dm_send_photo("photo.jpg", thread_id="tid123")
+
+
+@pytest.mark.asyncio
+async def test_dm_mute_redirected(client):
+    """dm_mute must raise FetchError on 302 (not silently follow redirect)."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 302
+    mock_resp.text = ""
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post = AsyncMock(return_value=mock_resp)
+        with pytest.raises(FetchError, match="redirected"):
+            await client.dm_mute("thread_abc", mute=True)
+
+
+@pytest.mark.asyncio
+async def test_dm_mute_html_response(client):
+    """dm_mute must raise FetchError when response is HTML (blocked session)."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = "<html><body>Login</body></html>"
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post = AsyncMock(return_value=mock_resp)
+        with pytest.raises(FetchError, match="got HTML"):
+            await client.dm_mute("thread_abc", mute=True)
+
+
+@pytest.mark.asyncio
+async def test_story_mark_seen_redirected(client):
+    """story_mark_seen must raise FetchError on 302 (not silently follow redirect)."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 302
+    mock_resp.text = ""
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post = AsyncMock(return_value=mock_resp)
+        with pytest.raises(FetchError, match="redirected"):
+            await client.story_mark_seen(["mid1"], ["oid1"], [1700000000])

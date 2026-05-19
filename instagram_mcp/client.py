@@ -4476,6 +4476,7 @@ class InstagramClient:
             "https://www.instagram.com/api/v1/direct_v2/threads/broadcast/photo/",
             data=data,
             headers=headers,
+            allow_redirects=False,
         )
         body_text = resp.text
         if resp.status_code in (301, 302, 303, 307, 308):
@@ -4555,14 +4556,21 @@ class InstagramClient:
             f"https://www.instagram.com/api/v1/direct_v2/threads/{thread_id}/{endpoint}/",
             data={},
             headers={"x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id,
-                     "Content-Type": "application/x-www-form-urlencoded"},
+                     "Content-Type": "application/x-www-form-urlencoded",
+                     "Cookie": self._cookie_str()},
+            allow_redirects=False,
         )
+        if resp.status_code in (301, 302, 303, 307, 308):
+            raise FetchError("dm_mute: redirected (session rate-limited)")
         if resp.status_code not in (200, 201):
             raise FetchError(f"dm_mute: HTTP {resp.status_code}: {resp.text[:200]}")
+        body_text = resp.text
+        if body_text.lstrip().startswith("<"):
+            raise FetchError(f"dm_mute: got HTML (session blocked): {body_text[:150]}")
         try:
-            body = resp.json()
+            body = _json.loads(body_text)
         except Exception:
-            raise FetchError(f"dm_mute: invalid JSON: {resp.text[:200]}")
+            raise FetchError(f"dm_mute: invalid JSON: {body_text[:200]}")
         if body.get("status") == "fail":
             raise FetchError(f"dm_mute: {body.get('message', 'unknown error')}")
         return {"status": "muted" if mute else "unmuted", "thread_id": thread_id}
@@ -5485,8 +5493,11 @@ class InstagramClient:
                 "origin": "https://www.instagram.com",
                 "Cookie": self._cookie_str(),
             },
+            allow_redirects=False,
         )
         body = resp.text
+        if resp.status_code in (301, 302, 303, 307, 308):
+            raise FetchError("story_mark_seen: redirected (session rate-limited)")
         if resp.status_code not in (200, 201):
             raise FetchError(f"story_mark_seen: HTTP {resp.status_code}: {body[:200]}")
         if body.lstrip().startswith("<"):
@@ -5532,7 +5543,7 @@ class InstagramClient:
             "email": email if email is not None else (current.get("email") or ""),
             "phone_number": phone_number if phone_number is not None else (current.get("phone_number") or ""),
             "username": current.get("username", ""),
-            "first_name": (full_name or current.get("full_name") or "").split()[0] if (full_name or current.get("full_name")) else "",
+            "first_name": _fn.split()[0] if (_fn := (full_name or current.get("full_name") or "")).strip() else "",
         }
 
         _ep_headers = {

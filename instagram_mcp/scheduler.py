@@ -172,6 +172,12 @@ class PostScheduler:
         async with self._lock:
             data = self._load()
             due = [e for e in data["scheduled"] if e.get("status") == "pending" and e.get("publish_at", 0) <= now]
+            # Mark as "publishing" atomically before releasing the lock so a
+            # concurrent or restarted loop can't pick up the same entries again.
+            for e in due:
+                e["status"] = "publishing"
+            if due:
+                self._save(data)
 
         for entry in due:
             logger.info("Publishing scheduled post %s (due %s)", entry["id"], entry["publish_at_str"])
