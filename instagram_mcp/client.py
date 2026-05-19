@@ -1388,7 +1388,7 @@ class InstagramClient:
                 "Accept": "application/json, text/plain, */*",
                 "Accept-Language": "en-US,en;q=0.9",
                 "Referer": "https://www.instagram.com/",
-                "X-IG-App-ID": "936619743392459",
+                "X-IG-App-ID": self._config.ig_app_id_mobile,
             },
         )
         status = resp.status_code
@@ -2198,7 +2198,7 @@ class InstagramClient:
         csrf = (cm.cookies.get("csrftoken", "") if cm else "") or ""
         headers = {
             "x-csrftoken": csrf,
-            "x-ig-app-id": "936619743392459",
+            "x-ig-app-id": self._config.ig_app_id_mobile,
             "x-requested-with": "XMLHttpRequest",
             "Cookie": self._cookie_str(),
         }
@@ -4267,7 +4267,7 @@ class InstagramClient:
             headers={
                 "x-csrftoken": csrf, "x-fb-lsd": lsd,
                 "x-fb-friendly-name": friendly_name,
-                "x-ig-app-id": "936619743392459",
+                "x-ig-app-id": self._config.ig_app_id_mobile,
                 "content-type": "application/x-www-form-urlencoded",
                 "referer": "https://www.instagram.com/direct/inbox/",
                 "origin": "https://www.instagram.com",
@@ -5296,7 +5296,7 @@ class InstagramClient:
         session = await self._get_auth_session()
         csrf = (cm.cookies.get("csrftoken", "")) or ""
         _base_hdrs = {
-            "x-csrftoken": csrf, "x-ig-app-id": "936619743392459",
+            "x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id_mobile,
             "content-type": "application/x-www-form-urlencoded",
             "accept": "application/json, */*",
             "referer": "https://www.instagram.com/",
@@ -5353,7 +5353,7 @@ class InstagramClient:
         session = await self._get_auth_session()
         csrf = (cm.cookies.get("csrftoken", "")) or ""
         headers = {
-            "x-csrftoken": csrf, "x-ig-app-id": "936619743392459",
+            "x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id_mobile,
             "content-type": "application/x-www-form-urlencoded",
             "accept": "application/json, */*",
             "referer": "https://www.instagram.com/",
@@ -5392,7 +5392,7 @@ class InstagramClient:
         csrf = (cm.cookies.get("csrftoken", "")) or ""
 
         _ck = self._cookie_str()
-        _sh = {"x-csrftoken": csrf, "x-ig-app-id": "936619743392459", "Cookie": _ck}
+        _sh = {"x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id_mobile, "Cookie": _ck}
         # Try i.instagram.com (mobile API) first, fall back to web topsearch
         resp = await session.get(
             "https://i.instagram.com/api/v1/users/search/",
@@ -5512,7 +5512,7 @@ class InstagramClient:
                 "nuxes_skipped": "{}",
             },
             headers={
-                "x-csrftoken": csrf, "x-ig-app-id": "936619743392459",
+                "x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id_mobile,
                 "content-type": "application/x-www-form-urlencoded",
                 "referer": "https://www.instagram.com/",
                 "origin": "https://www.instagram.com",
@@ -5552,7 +5552,7 @@ class InstagramClient:
         my_id = (cm.cookies.get("ds_user_id", "")) or ""
         info_resp = await session.get(
             f"https://www.instagram.com/api/v1/users/{my_id}/info/",
-            headers={"x-csrftoken": csrf, "x-ig-app-id": "936619743392459", "Cookie": self._cookie_str()},
+            headers={"x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id_mobile, "Cookie": self._cookie_str()},
             allow_redirects=False,
         )
         current: Dict[str, Any] = {}
@@ -5575,7 +5575,7 @@ class InstagramClient:
         }
 
         _ep_headers = {
-            "x-csrftoken": csrf, "x-ig-app-id": "936619743392459",
+            "x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id_mobile,
             "content-type": "application/x-www-form-urlencoded",
             "referer": "https://www.instagram.com/accounts/edit/",
             "origin": "https://www.instagram.com",
@@ -5621,7 +5621,7 @@ class InstagramClient:
             f"https://www.instagram.com/api/v1/web/save/{media_id}/save/",
             data={},
             headers={
-                "x-csrftoken": csrf, "x-ig-app-id": "936619743392459",
+                "x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id_mobile,
                 "content-type": "application/x-www-form-urlencoded",
                 "referer": "https://www.instagram.com/",
                 "origin": "https://www.instagram.com",
@@ -5649,7 +5649,7 @@ class InstagramClient:
             f"https://www.instagram.com/api/v1/web/save/{media_id}/unsave/",
             data={},
             headers={
-                "x-csrftoken": csrf, "x-ig-app-id": "936619743392459",
+                "x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id_mobile,
                 "content-type": "application/x-www-form-urlencoded",
                 "referer": "https://www.instagram.com/",
                 "origin": "https://www.instagram.com",
@@ -5677,7 +5677,7 @@ class InstagramClient:
             f"https://www.instagram.com/api/v1/web/friendships/{user_id}/block/",
             data={"user_id": user_id},
             headers={
-                "x-csrftoken": csrf, "x-ig-app-id": "936619743392459",
+                "x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id_mobile,
                 "content-type": "application/x-www-form-urlencoded",
                 "referer": "https://www.instagram.com/",
                 "origin": "https://www.instagram.com",
@@ -5714,7 +5714,7 @@ class InstagramClient:
             f"https://www.instagram.com/api/v1/web/friendships/{user_id}/unblock/",
             data={"user_id": user_id},
             headers={
-                "x-csrftoken": csrf, "x-ig-app-id": "936619743392459",
+                "x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id_mobile,
                 "content-type": "application/x-www-form-urlencoded",
                 "referer": "https://www.instagram.com/",
                 "origin": "https://www.instagram.com",
@@ -5754,7 +5754,7 @@ class InstagramClient:
             f"https://www.instagram.com/api/v1/web/likes/{media_id}/{action}/",
             data={},
             headers={
-                "x-csrftoken": csrf, "x-ig-app-id": "936619743392459",
+                "x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id_mobile,
                 "content-type": "application/x-www-form-urlencoded",
                 "referer": "https://www.instagram.com/",
                 "origin": "https://www.instagram.com",
@@ -5789,7 +5789,7 @@ class InstagramClient:
         csrf = (cm.cookies.get("csrftoken", "")) or ""
         endpoint = "create" if action == "follow" else "destroy"
         headers = {
-            "x-csrftoken": csrf, "x-ig-app-id": "936619743392459",
+            "x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id_mobile,
             "content-type": "application/x-www-form-urlencoded",
             "referer": "https://www.instagram.com/",
             "origin": "https://www.instagram.com",
@@ -6177,7 +6177,7 @@ class InstagramClient:
         session = await self._get_session(None)
         url = f"https://www.instagram.com/explore/tags/{tag}/?__a=1&__d=dis"
         headers = {
-            "x-ig-app-id": "936619743392459",
+            "x-ig-app-id": self._config.ig_app_id_mobile,
             "x-requested-with": "XMLHttpRequest",
             "referer": f"https://www.instagram.com/explore/tags/{tag}/",
         }

@@ -2,47 +2,23 @@
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![MCP](https://img.shields.io/badge/MCP-compatible-green) ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey) [![CI](https://github.com/mpython77/instagram-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mpython77/instagram-mcp/actions/workflows/ci.yml) [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/mpython77/instagram-mcp/pkgs/container/instagram-mcp)
 
-A production-grade MCP (Model Context Protocol) server for Instagram intelligence. Exposes **58 tools** across two auth tiers — 28 tools run fully anonymously with no credentials; the rest require a `cookies.json` session file. Built on `curl_cffi` with Chrome TLS impersonation, adaptive rate limiting, smart caching, automatic JSON export, post scheduling, DM tools, account monitoring, multi-account sessions, and OAuth support.
+Production-grade MCP server for Instagram. **77 tools** — 28 anonymous (no credentials), 48 authenticated, 1 auto-mode. Built on `curl_cffi` with Chrome TLS impersonation, adaptive rate limiting, and smart caching.
 
-Works natively with **Claude Desktop**, **Claude Code**, and any MCP-compatible AI client.
+Works with **Claude Desktop**, **Claude Code**, and any MCP-compatible AI client.
 
 ---
 
-## Overview
+## Auth Tiers
 
-### Auth Tiers
-
-| Tier | Symbol | Requirement | Tool count |
-|------|--------|-------------|-----------|
-| Anonymous | 🌐 | None — no login, no cookies | 28 tools |
-| Authenticated | 🔐 | `cookies.json` with a valid Instagram session | 29 tools |
-| Auto-mode | 🌐/🔐 | Works anonymously, upgrades when cookies present | 1 tool |
-
-`instagram_hashtag` auto-upgrades from anon to auth mode when cookies are present.
-
-### Key Features
-
-- **Strict Chrome TLS impersonation** via `curl_cffi` — 100% of HTTP requests (API, Auth, Webhooks) use impersonation to bypass fingerprinting
-- **Adaptive rate limiter** — token-bucket with auto-backoff on 429, and a global circuit breaker to prevent account bans
-- **Smart cache** — per-endpoint TTLs, LRU eviction, instant repeat calls
-- **Proxy pool** — round-robin with per-proxy health tracking, masked credentials, auto-fallback to direct
-- **Progress reporting** — MCP-native `report_progress` on every paginated tool
-- **JSON auto-export** — every tool result saved to `exports/` with `_meta` + `_summary` + `data`
-- **Selective toolsets** — enable only the groups you need via `INSTAGRAM_MCP_TOOLSETS`
-- **Post scheduling** — schedule posts for future publishing; auto-published by background task
-- **DM tools** — read inbox, fetch threads, send messages with browser-grade headers
-- **Account monitoring** — poll accounts for new posts and securely fire webhook notifications
-- **Multi-account sessions** — run multiple Instagram sessions simultaneously
-- **Managed OAuth** — full Graph API OAuth 2.0 flow with tokens securely isolated in `.state/`
-- **Upload support** — publish single photos or carousels directly from Claude
-- **Download support** — save images, videos, reels, and carousel slides to disk
-- **Docker** — containerized deployment with `docker-compose` or GHCR image
+| Tier | Symbol | Requirement | Tools |
+|------|--------|-------------|-------|
+| Anonymous | 🌐 | None | 28 |
+| Authenticated | 🔐 | `cookies.json` with valid Instagram session | 48 |
+| Auto-mode | 🌐/🔐 | Anon by default, upgrades when cookies present | 1 |
 
 ---
 
 ## Installation
-
-### Using pip
 
 ```bash
 git clone https://github.com/mpython77/instagram-mcp.git
@@ -51,36 +27,26 @@ pip install -e .
 instagram-mcp
 ```
 
-### Using uv
+With `uv`:
 
 ```bash
-uv sync
-uv run --quiet instagram-mcp
+uv sync && uv run --quiet instagram-mcp
 ```
 
-### Cookie Setup (for authenticated tools)
+### Cookie Setup
 
 1. Log in to Instagram in your browser.
-2. Install a cookie export extension:
-   - Chrome/Firefox: **"Cookie-Editor"** or **"EditThisCookie"**
-3. Navigate to `instagram.com`, click the extension, export as JSON.
-4. Save the file as `cookies.json` in the project root or set `INSTAGRAM_MCP_COOKIES=/path/to/cookies.json`.
+2. Install [Cookie-Editor](https://cookie-editor.com/) and navigate to `instagram.com`.
+3. Export cookies as **JSON**.
+4. Save as `cookies.json` in the project root, or set `INSTAGRAM_MCP_COOKIES=/path/to/file`.
 
-*Note: You can also use `cookies.txt` (Netscape format), but `cookies.json` is recommended to avoid parsing issues with special characters.*
+> Use a dedicated account — not your personal account. Sessions expire; refresh `cookies.json` if you get 401 errors.
 
-**Session hygiene:**
-- Use a dedicated account — not your personal account.
-- Sessions expire; refresh `cookies.json` if you get 401 errors.
-- Do not share the same session between scraping and normal browsing.
+---
 
-### Configuration (Environment Variables)
+## MCP Config
 
-- `INSTAGRAM_MCP_USER_AGENT`: Custom browser User-Agent string.
-- `INSTAGRAM_MCP_IMPERSONATE`: Browser fingerprint to impersonate (default: `chrome142`).
-- `INSTAGRAM_MCP_COOKIES`: Path to `cookies.json` or `cookies.txt`.
-- `INSTAGRAM_MCP_PROXIES`: Comma-separated list of proxies.
-
-### MCP Config for Claude Desktop
+### Claude Desktop
 
 **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`  
 **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
@@ -91,9 +57,7 @@ uv run --quiet instagram-mcp
     "instagram": {
       "command": "instagram-mcp",
       "env": {
-        "INSTAGRAM_MCP_COOKIES": "/absolute/path/to/cookies.txt",
-        "INSTAGRAM_MCP_PROXIES": "http://user:pass@host:port",
-        "INSTAGRAM_MCP_EXPORT_DIR": "/absolute/path/to/exports"
+        "INSTAGRAM_MCP_COOKIES": "/absolute/path/to/cookies.json"
       }
     }
   }
@@ -107,1319 +71,232 @@ With `uv`:
   "mcpServers": {
     "instagram": {
       "command": "uv",
-      "args": ["run", "--project", "/path/to/instagram_mcp", "instagram-mcp"],
+      "args": ["run", "--project", "/path/to/instagram-mcp", "instagram-mcp"],
       "env": {
-        "INSTAGRAM_MCP_COOKIES": "/absolute/path/to/cookies.txt"
+        "INSTAGRAM_MCP_COOKIES": "/absolute/path/to/cookies.json"
       }
     }
   }
 }
 ```
 
-### MCP Config for Claude Code
+### Claude Code
 
 ```bash
-claude mcp add instagram instagram-mcp --env INSTAGRAM_MCP_COOKIES=/path/to/cookies.txt
+claude mcp add instagram instagram-mcp --env INSTAGRAM_MCP_COOKIES=/path/to/cookies.json
 ```
 
 ---
 
 ## Docker
 
-### Quick start with Docker
-
 ```bash
-# Pull and run (HTTP transport, port 8000)
 docker run -d \
-  -e INSTAGRAM_MCP_TRANSPORT=http \
-  -e INSTAGRAM_MCP_COOKIES=/data/cookies.txt \
-  -v /path/to/cookies.txt:/data/cookies.txt:ro \
+  -e INSTAGRAM_MCP_COOKIES=/data/cookies.json \
+  -v /path/to/cookies.json:/data/cookies.json:ro \
   -p 8000:8000 \
   ghcr.io/mpython77/instagram-mcp:latest
-
-# Or with docker-compose (edit docker-compose.yml first)
-docker compose up -d
-```
-
-### Docker + Claude Desktop
-
-```json
-{
-  "mcpServers": {
-    "instagram": {
-      "command": "docker",
-      "args": ["run", "--rm", "-i",
-        "-e", "INSTAGRAM_MCP_COOKIES=/data/cookies.txt",
-        "-v", "/path/to/cookies.txt:/data/cookies.txt:ro",
-        "ghcr.io/mpython77/instagram-mcp:latest"
-      ]
-    }
-  }
-}
 ```
 
 ---
 
-## New Features
-
-### Post Scheduling (`instagram_schedule`)
-
-Schedule posts for automatic future publishing:
-
-```
-instagram_schedule(action="add", images=["/path/image.jpg"], caption="Hello!", publish_at="2026-06-01T10:00:00")
-instagram_schedule(action="list")
-instagram_schedule(action="cancel", post_id="abc12345")
-instagram_schedule(action="status")
-```
-
-### DM Tools
-
-Read and send direct messages (requires `cookies.txt`):
-
-```
-instagram_dm_inbox(limit=20)
-instagram_dm_thread(thread_id="<thread_id>", limit=20)
-instagram_dm_send(thread_id="<thread_id>", text="Hello!")
-```
-
-### Account Monitoring (`instagram_monitor`)
-
-Monitor accounts for new posts and fire webhooks:
-
-```
-instagram_monitor(action="add", username="nike", webhook_url="https://yoursite.com/hook", interval=300)
-instagram_monitor(action="list")
-instagram_monitor(action="test", webhook_url="https://yoursite.com/hook")
-instagram_monitor(action="remove", username="nike")
-```
-
-Webhook payload:
-```json
-{"event": "new_post", "username": "nike", "shortcode": "DXj...", "post_url": "...", "likes": 12345}
-```
-
-### Multi-Account Sessions (`instagram_sessions`)
-
-Run multiple Instagram accounts simultaneously:
-
-```bash
-# Set env vars for each account
-export INSTAGRAM_MCP_COOKIES=cookies_default.txt
-export INSTAGRAM_MCP_COOKIES_BRAND=cookies_brand.txt
-export INSTAGRAM_MCP_COOKIES_AGENCY=cookies_agency.txt
-```
-
-```
-instagram_sessions(action="list")
-```
-
-### Managed OAuth (`instagram_oauth`)
-
-Full Instagram Graph API OAuth 2.0 flow:
-
-```bash
-# Configure env vars
-export INSTAGRAM_MCP_OAUTH_APP_ID="your_app_id"
-export INSTAGRAM_MCP_OAUTH_APP_SECRET="your_app_secret"
-export INSTAGRAM_MCP_OAUTH_REDIRECT_URI="https://yourapp.com/callback"
-```
-
-```
-instagram_oauth(action="init_flow")         # Get authorization URL
-instagram_oauth(action="exchange_code", code="<callback_code>")  # Get token
-instagram_oauth(action="refresh_token")     # Refresh before expiry
-instagram_oauth(action="status")            # Check token validity
-```
-
----
-
-## All 58 Tools
-
-### 🗂️ Profile & Feed
-
-#### `instagram_profile` 🌐
-
-Fetch a public account's profile data. Controls depth via flags.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `username` | str | required | Instagram username (without @) |
-| `include_feed` | bool | `true` | Fetch recent posts and extract tags/mentions/hashtags |
-| `max_feed_posts` | int | `12` | Posts to analyse when include_feed=True (1–12) |
-| `max_age_days` | int | `30` | Ignore posts older than N days |
-| `check_alive` | bool | `true` | Return last_post_days and active/dead status |
-| `dead_threshold_days` | int | `365` | Days without posts to mark account dead |
-| `since_date` / `until_date` | str | `""` | Filter posts by date: DD.MM.YYYY |
-| `since_timestamp` / `until_timestamp` | int | `None` | Unix timestamp alternatives to since_date/until_date |
-
-**Modes:**
-
-| Mode | include_feed | check_alive | Use case |
-|------|-------------|-------------|----------|
-| Full (default) | true | true | Profile + feed tags + activity |
-| Status check | false | true | Fastest: is the account active/dead/private? |
-| Profile only | false | false | Bio + followers — single API call |
-| Tags only | true | false | Tag extraction, no dead-check |
-
----
-
-#### `instagram_feed_deep` 🌐
-
-Paginated feed analysis. Fetches up to 200 posts across multiple API pages (~50 posts/page). Supports smart date-range pagination — paginates until the requested window is fully covered.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `username` | str | required | Instagram username (without @) |
-| `max_posts` | int | `50` | Posts to fetch (1–200) |
-| `max_age_days` | int | `30` | Stop when posts exceed this age |
-| `include_posts_detail` | bool | `false` | Include full caption, hashtags, likes, location, music per post |
-| `since_date` / `until_date` | str | `""` | Filter posts by date |
-| `since_timestamp` / `until_timestamp` | int | `None` | Unix timestamp alternatives to since_date/until_date |
-
-**Note:** Play counts on reels are not available via this tool. Use `instagram_reels` for play counts.
-
----
-
-#### `instagram_bulk_check` 🌐
-
-Fetch up to 20 profiles in parallel with activity status for each.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `usernames` | list[str] | required | Up to 20 usernames (without @) |
-| `concurrency` | int | `5` | Parallel fetch count (1–20) |
-
-Status values: `active`, `dead`, `private`, `not_found`. Non-found accounts appear in results rather than raising errors.
-
----
-
-#### `instagram_compare_profiles` 🌐
-
-Side-by-side comparison of 2–5 accounts fetched in parallel.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `usernames` | list[str] | required | 2–5 usernames (without @) |
-
-Compared fields: followers, following, posts count, ER%, verification, account type, category, website, posting frequency, content mix.
-
----
-
-### 📊 Analysis
-
-#### `instagram_analyze_engagement` 🌐
-
-Calculates ER% and detailed content analytics across up to 200 posts.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `username` | str | required | Instagram username (without @) |
-| `max_posts` | int | `50` | Posts to analyse (1–200) |
-| `max_age_days` | int | `90` | Skip posts older than N days |
-| `since_date` / `until_date` | str | `""` | Date filters |
-| `since_timestamp` / `until_timestamp` | int | `None` | Unix timestamp alternatives to since_date/until_date |
-
-**Formula:** `ER% = (avg_likes + avg_comments) / followers × 100`
-
-**Benchmarks:** Excellent ≥6% / Good 3–6% / Average 1–3% / Low <1%
-
-**Output:** ER% with rating, content mix (image/video/reel/carousel), best posting days by avg engagement, top 5 posts by likes, top 15 hashtags by frequency, posting frequency.
-
----
-
-#### `instagram_find_collab_network` 🌐
-
-Maps all people who appear across recent posts across four relationship types: photo usertags, caption @mentions, official co-authors, and paid sponsors.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `username` | str | required | Instagram username (without @) |
-| `max_posts` | int | `50` | Posts to scan (1–200) |
-| `max_age_days` | int | `90` | Skip posts older than N days |
-| `min_frequency` | int | `1` | Minimum appearances to include (1–50) |
-| `since_date` / `until_date` | str | `""` | Date filters |
-| `since_timestamp` / `until_timestamp` | int | `None` | Unix timestamp alternatives to since_date/until_date |
-
----
-
-#### `instagram_account_report` 🌐
-
-All-in-one account intelligence report — runs `instagram_profile` + `instagram_analyze_engagement` + `instagram_find_collab_network` in a single tool call. Replaces three separate calls.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `username` | str | required | Instagram username (without @) |
-| `max_posts` | int | `50` | Posts to analyse (1–200) |
-| `include_collab` | bool | `true` | Include collaborator network section |
-
----
-
-### 📸 Content
-
-#### `instagram_post` 🌐
-
-Full details for a single post by shortcode or URL. Parses public HTML — no auth required.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `post` | str | required | Shortcode or full URL (`/p/`, `/reel/`, `/tv/`) |
-
-**Accepted formats:** `DXjuqH9nDVE` · `https://www.instagram.com/p/DXjuqH9nDVE/` · `instagram.com/reel/ABC123/`
-
-**Returns:** post_type, author, likes, comments, view_count, play_count, caption, hashtags, mentions, usertags, coauthors, sponsor_tags, music_artist, music_title, location (name + GPS lat/lng + Maps URL), timestamp, carousel_count, duration_secs.
-
----
-
-#### `instagram_post_bulk` 🌐
-
-Fetch up to 50 posts in parallel by shortcode or URL list.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `shortcodes` | list[str] | required | 1–50 shortcodes or URLs |
-| `max_concurrency` | int | `5` | Parallel fetch limit (1–20) |
-
-Non-blocking — partial results returned if individual posts fail.
-
----
-
-#### `instagram_post_comments` 🌐
-
-Fetch comments with engagement metrics and thread structure.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `post` | str | required | Shortcode or URL |
-| `max_comments` | int | `100` | Maximum comments (1–500) |
-| `sort_order` | str | `"popular"` | `popular` (most-liked first) or `recent` (chronological) |
-
-**Per comment:** username, text, comment_like_count, child_comment_count, created_at, is_verified, has_gif, is_caption.
-
----
-
-#### `instagram_post_likers` 🔐
-
-Fetch users who liked a post with full friendship status per liker.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `post` | str | required | Post shortcode or URL |
-
-Returns up to ~98 likers. Per user: username, full_name, is_verified, is_private, you_follow_them, they_follow_you, recent_reel_activity, plus total like count for the post.
-
----
-
-### 🔍 Hashtag & Discovery
-
-#### `instagram_hashtag` 🌐/🔐
-
-Fetch top posts for a hashtag. Auto-upgrades to auth mode when cookies are present.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `tag` | str | required | Hashtag without # (e.g., `football`) |
-| `max_posts` | int | `30` | Max posts (anon: always 12; auth: up to 300) |
-
-**Anon mode:** Parses public HTML → 12 posts + related_searches. Blocked for some hashtags (#swimwear, #fitness, etc.).
-
-**Auth mode:** Uses paginated API → up to 300 posts with full like_count, play_count, comment_count.
-
----
-
-#### `instagram_hashtag_deep` 🌐/🔐
-
-Deep hashtag analytics: top accounts ranked by engagement, content type breakdown, best posting hour, aggregate stats across up to 500 posts.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `tag` | str | required | Hashtag without # |
-| `max_posts` | int | `90` | Posts to analyse (1–500) |
-| `top_n` | int | `15` | Top accounts to include (1–50) |
-
-**Output:** avg likes/comments/views, total reach, media type breakdown (%), best hour UTC, ranked top-N accounts table.
-
----
-
-#### `instagram_niche_top` 🌐/🔐
-
-Leaderboard of top accounts for a hashtag, ranked by engagement, post count, or total likes.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `tag` | str | required | Hashtag without # |
-| `max_posts` | int | `90` | Posts to scan (12–500) |
-| `top_n` | int | `15` | Accounts in leaderboard (3–50) |
-| `sort_by` | str | `"engagement"` | `engagement`, `post_count`, or `total_likes` |
-
----
-
-#### `instagram_similar_accounts` 🔐
-
-Discover accounts Instagram considers similar via the internal chaining API.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `username` | str | required | Seed account (without @) |
-| `limit` | int | `20` | Max similar accounts (1–50) |
-
-**Endpoint:** `www.instagram.com/api/v1/discover/chaining/?target_id={pk}`
-
----
-
-#### `instagram_hashtag_suggest` 🌐
-
-Suggest related hashtags for a niche by analyzing top posts under the seed hashtag. Extracts all hashtags from captions, ranks by frequency, classifies by tier, and returns a ready-to-copy set.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `seed_hashtag` | str | required | Seed hashtag (with or without #) |
-| `target_count` | int | `30` | How many hashtags to return (5–50) |
-
-**Output:** seed, posts_analyzed, unique_hashtags_found, tiers (mega/macro/mid/micro), balanced_set list, copy_paste string.
-
----
-
-#### `instagram_caption_analyze` 🌐
-
-Analyzes caption patterns across recent posts for a public account. Reports average caption length, hashtag density, emoji usage rate, CTA rate, top hashtags, and actionable insights.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `username` | str | required | Instagram username (without @) |
-| `max_posts` | int | `20` | Posts to analyze (5–50) |
-
-**Output:** avg_caption_length, avg_hashtag_count, emoji_usage_rate, cta_usage_rate, top_hashtags, top_posts_by_likes, insights.
-
----
-
-#### `instagram_search` 🔐
-
-Search Instagram for accounts and/or hashtags by keyword.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `query` | str | required | Search keyword |
-| `context` | str | `"blended"` | `blended` (users + hashtags), `user`, or `hashtag` |
-
-**Per user:** username, full_name, is_verified, is_private, follower_count.  
-**Per hashtag:** name, total post count.
-
----
-
-### 👥 Social Graph
-
-#### `instagram_followers_list` 🔐
-
-Fetch recent followers with mutual follow status.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `username` | str | required | Instagram username (without @) |
-| `max_users` | int | `50` | Max followers to return (1–1000) |
-
-**Limitation:** For accounts *other than your own*, Instagram restricts follower pagination to ~50 users. For your *own* account, full pagination is supported (up to 1000).
-
----
-
-#### `instagram_following_list` 🔐
-
-Fetch the full following list with favorite detection and pagination.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `username` | str | required | Instagram username (without @) |
-| `max_users` | int | `200` | Max following accounts (1–1000, 50 per page) |
-
-**Per user:** username, full_name, is_verified, is_private, is_favorite (Close Friend marker), you_follow_them, they_follow_you, recent_reel_activity.
-
----
-
-#### `instagram_tagged_by` 🔐
-
-Fetch posts made by OTHER accounts that tag this account (the Tagged tab).
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `username` | str | required | Account to check (without @) |
-| `max_posts` | int | `50` | Max tagged posts (1–200) |
-| `min_poster_followers` | int | `0` | Filter taggers with fewer followers |
-
-**Distinction:** `instagram_find_collab_network` finds who appears in posts the account CREATED; `instagram_tagged_by` finds posts OTHERS created that tag this account.
-
----
-
-#### `instagram_reposts` 🔐
-
-Fetch content that an account actively reposted from other creators (Reposts Tab).
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `username` | str | required | Instagram username (without @) |
-| `max_posts` | int | `50` | Max repost items (1–200) |
-
-**Signal:** A repost is an explicit endorsement — stronger relationship signal than a tag or mention.
-
----
-
-#### `instagram_user_search` 🔐
-
-Search Instagram users by username or display name. Returns ranked results with follower counts.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `query` | str | required | Search query (username or name) |
-| `count` | int | `10` | Max results (1–50) |
-
-**Per user:** username, full_name, is_verified, is_private, follower_count.
-
-**Distinction from `instagram_search`:** This tool targets users only via the authenticated user-search API (higher quality ranking). `instagram_search` is anonymous and covers both users and hashtags.
-
----
-
-#### `instagram_user_followers` 🔐
-
-Fetch the followers list for any user by their numeric `user_id`. Supports pagination.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `user_id` | str | required | Numeric Instagram user ID (get from `instagram_profile`) |
-| `count` | int | `50` | Users per page (1–200) |
-| `max_id` | str | `""` | Pagination cursor from previous result's `next_max_id` |
-
-**Per user:** username, full_name, is_verified, is_private, user_id. Returns `next_max_id` for pagination.
-
----
-
-#### `instagram_user_following` 🔐
-
-Fetch the following list for any user by their numeric `user_id`. Supports pagination.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `user_id` | str | required | Numeric Instagram user ID (get from `instagram_profile`) |
-| `count` | int | `50` | Users per page (1–200) |
-| `max_id` | str | `""` | Pagination cursor from previous result's `next_max_id` |
-
-**Per user:** username, full_name, is_verified, is_private, user_id. Returns `next_max_id` for pagination.
-
----
-
-### 🎬 Media
-
-#### `instagram_reels` 🔐
-
-Fetch an account's reels with play counts. The ONLY tool that exposes play_count — the standard feed API does not return it.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `username` | str | required | Instagram username (without @) |
-| `max_reels` | int | `50` | Max reels (1–200, 12 per page) |
-
-**Endpoint:** GraphQL `PolarisProfileReelsTabContentQuery_connection`
-
----
-
-#### `instagram_stories` 🔐
-
-Fetch an account's currently active Stories (expires after 24h, cached 2 min).
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `username` | str | required | Instagram username (without @) |
-
-**Per story:** media_type, duration_secs, mentions, hashtags, linked_post_code, music_title, music_artist, link_stickers, polls, is_paid_partnership.
-
----
-
-#### `instagram_highlights` 🔐
-
-Fetch an account's Highlights tray and optionally the media inside each highlight.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `username` | str | required | Instagram username (without @) |
-| `max_highlights` | int | `50` | Max highlights from tray (1–200) |
-| `include_media` | bool | `false` | Fetch story items inside highlights |
-| `max_media_highlights` | int | `3` | Fetch media for top N highlights (1–10) |
-
----
-
-#### `instagram_audio_reels` 🔐
-
-Fetch all reels using a specific audio track, identified by `audio_cluster_id`.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `audio_cluster_id` | str | required | Numeric audio cluster ID |
-| `max_reels` | int | `24` | Max reels to return (1–100) |
-
-**How to find audio_cluster_id:** Extract from a reel's `clips_metadata.music_info.audio_cluster_id`, or from the audio page URL `instagram.com/reels/audio/{id}/`.
-
----
-
-#### `instagram_location_posts` 🔐
-
-Fetch top posts at a geographic location by Instagram location ID or name.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `location_id` | str | `""` | Numeric Instagram location ID (preferred) |
-| `location_name` | str | `""` | Location name to search if ID not known |
-| `max_posts` | int | `33` | Max posts (1–100) |
-
-**How to find location_id:** Extract from any post's location data via `instagram_post`, or visit `instagram.com/explore/locations/{id}/`.
-
----
-
-### 📤 Upload & Download
-
-#### `instagram_upload_photo` 🔐
-
-Upload 1–10 images to Instagram as a post (single photo or carousel). Returns the post URL and shortcode immediately after publishing.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `images` | list[str] | required | 1–10 absolute file paths (JPEG native; PNG requires Pillow) |
-| `caption` | str | `""` | Post caption text |
-| `disable_comments` | bool | `false` | Disable comments on the post |
-| `hide_like_count` | bool | `false` | Hide like count from other viewers |
-| `location_id` | str | `""` | Optional Instagram location ID |
-
-**Note:** This is a write operation — it publishes a real post to Instagram.
-
----
-
-#### `instagram_upload_reel` 🔐
-
-Upload an MP4 video and publish it as an Instagram Reel.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `video_path` | str | required | Absolute local path to an MP4 video file (H.264 recommended, max 90s) |
-| `caption` | str | `""` | Reel caption (max 2200 chars). Supports @mentions and #hashtags |
-| `cover_path` | str | `null` | Optional local path to a JPEG/PNG cover image |
-| `disable_comments` | bool | `false` | Disable comments on the Reel |
-| `hide_like_count` | bool | `false` | Hide like count from viewers |
-| `share_to_feed` | bool | `true` | Also share the Reel to the main feed |
-
-**Returns:** Reel URL and `media_id` on success.
-
----
-
-#### `instagram_download` 🔐
-
-Download all media files from an Instagram post to a local directory.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `post` | str | required | Post shortcode or URL |
-| `save_dir` | str | `"/tmp"` | Local directory path to save files |
-
-**Supports:**
-- Single image posts → saves 1 `.jpg`
-- Video / Reel posts → saves 1 `.mp4`
-- Carousel posts → saves N `.jpg`/`.mp4` files (one per slide)
-
-**Endpoint:** `/api/v1/media/{id}/info/` — fetches full media metadata including CDN URLs before downloading.
-
-**Example output:**
-```
-## Download complete — `DXjuqH9nDVE`
-- Type: carousel
-- Files: 4/4 saved in `/home/user/downloads`
-- Time: 3.21s
-
-### Saved files
-- `/home/user/downloads/DXjuqH9nDVE_1.jpg` (482 KB, jpg)
-- `/home/user/downloads/DXjuqH9nDVE_2.jpg` (519 KB, jpg)
-- `/home/user/downloads/DXjuqH9nDVE_3.mp4` (8,204 KB, mp4)
-- `/home/user/downloads/DXjuqH9nDVE_4.jpg` (477 KB, jpg)
-```
-
----
-
-### 💬 DM Actions
-
-#### `instagram_dm_react` 🔐
-
-Add or remove an emoji reaction to a DM message.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `thread_id` | str | required | Thread ID from `instagram_dm_inbox` |
-| `item_id` | str | required | Message item_id to react to |
-| `emoji` | str | `"❤"` | Emoji to react with |
-| `action` | str | `"react"` | `react` to add reaction, `unreact` to remove |
-
----
-
-#### `instagram_dm_unsend` 🔐
-
-Delete a DM message (removes it for all participants in the thread).
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `thread_id` | str | required | Thread ID from `instagram_dm_inbox` |
-| `item_id` | str | required | Message item_id to delete |
-
-**Destructive:** Cannot be undone. Removes the message for everyone in the thread.
-
----
-
-#### `instagram_dm_mark_seen` 🔐
-
-Mark a DM thread as seen up to a specific message (clears the unread indicator).
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `thread_id` | str | required | Thread ID to mark as seen |
-| `item_id` | str | required | item_id of the last message to mark as read |
-
----
-
-### ✋ Interactions
-
-#### `instagram_post_like` 🔐
-
-Like or unlike an Instagram post.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `media_id` | str | required | Numeric media_id of the post |
-| `action` | str | `"like"` | `like` or `unlike` |
-
-**How to find media_id:** Use `instagram_post` — it returns `media_id` in the result.
-
----
-
-#### `instagram_post_save` 🔐
-
-Save (bookmark) or unsave an Instagram post.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `media_id` | str | required | Numeric media_id of the post |
-| `action` | str | `"save"` | `save` to bookmark, `unsave` to remove |
-
----
-
-#### `instagram_post_comment` 🔐
-
-Post a comment on an Instagram post.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `media_id` | str | required | Numeric media_id of the post |
-| `text` | str | required | Comment text (max 2200 chars) |
-
-**Returns:** comment_id and the posted text on success.
-
----
-
-#### `instagram_delete_comment` 🔐
-
-Delete a comment from an Instagram post. You can delete your own comments on any post, or any comment on your own posts.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `media_id` | str | required | Numeric media_id of the post (from `instagram_post`) |
-| `comment_id` | str | required | Numeric comment_id to delete (from `instagram_post_comments`) |
-
-**Destructive:** Cannot be undone.
-
----
-
-#### `instagram_follow_user` 🔐
-
-Follow or unfollow a user by their numeric user_id.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `user_id` | str | required | Numeric Instagram user ID |
-| `action` | str | `"follow"` | `follow` or `unfollow` |
-
-**Note:** If the target account is private, following sends a follow request instead of immediately following.
-
----
-
-#### `instagram_block_user` 🔐
-
-Block or unblock a user by their numeric user_id.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `user_id` | str | required | Numeric Instagram user ID |
-| `action` | str | `"block"` | `block` or `unblock` |
-
-**Destructive:** Blocking removes the user from your followers and prevents them from seeing your content.
-
----
-
-#### `instagram_edit_profile` 🔐
-
-Edit your Instagram profile fields. Only provide the fields you want to change — others are kept as-is.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `biography` | str | `null` | New bio text (max 150 chars) |
-| `full_name` | str | `null` | New display name (max 30 chars) |
-| `external_url` | str | `null` | New website URL |
-| `email` | str | `null` | New email address |
-| `phone_number` | str | `null` | New phone number |
-
-**Returns:** Updated profile with username, full_name, biography, and external_url.
-
----
-
-#### `instagram_publish_story` 🔐
-
-Publish a photo as an Instagram Story (visible for 24 hours).
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `image_path` | str | required | Local path to a JPEG or PNG image file |
-| `close_friends_only` | bool | `false` | Publish to Close Friends list only |
-
-**Returns:** `media_id` of the published story.
-
----
-
-#### `instagram_story_mark_seen` 🔐
-
-Mark one or more stories as viewed. Use after fetching stories with `instagram_stories`.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `reel_ids` | list[str] | required | List of story media_ids to mark as seen |
-| `owner_ids` | list[str] | required | List of owner user_ids (one per story) |
-| `taken_ats` | list[int] | required | List of taken_at Unix timestamps (one per story) |
-
-**Workflow:** Call `instagram_stories` → extract `media_id`, `owner_id`, and `taken_at` per item → pass them here.
-
----
-
-#### `instagram_story_reply` 🔐
-
-Reply to a story by sending a DM to the story owner.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `username` | str | required | Story owner's Instagram username |
-| `text` | str | required | Reply message text (max 1000 chars) |
-
-**Note:** Sends a direct message to the account's DM inbox referencing their story.
-
----
-
-### 📢 Broadcast & Threads
-
-#### `instagram_broadcast_channel` 🔐
-
-Read an Instagram Broadcast Channel — one-way creator update channels accessible to followers.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `channel_id` | str | required | Broadcast channel ID |
-| `action` | str | `"info"` | `info` for channel metadata; `posts` for recent messages |
-| `max_id` | str | `null` | Pagination cursor from a previous `posts` call |
-
-**Actions:**
-
-| Action | Returns |
-|--------|---------|
-| `info` | title, description, subscriber_count, broadcast_status |
-| `posts` | list of posts with text, like_count, and next_max_id cursor |
-
----
-
-#### `instagram_threads_profile` 🌐
-
-Get a profile from Meta's Threads platform (`threads.net`).
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `username` | str | required | Threads username (with or without @) |
-
-**Returns:** username, display_name, followers, following, threads_count, bio, is_verified, is_private.
-
-**Note:** Uses the Threads API — no Instagram cookies required.
-
----
-
-#### `instagram_threads_posts` 🌐
-
-Get recent posts (threads) for a Threads user. Supports pagination.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `username` | str | required | Threads username (with or without @) |
-| `max_id` | str | `null` | Pagination cursor from previous result's `next_max_id` |
-
-**Per post:** post_id, text preview, like_count, reply_count. Returns up to 20 posts per page.
-
----
-
-### ⚡ Batch
-
-#### `instagram_batch_scrape` 🌐
-
-Large-scale scraping for up to 2000 profiles. Async, high-concurrency, with resume support, streaming JSONL output, and fail-fast protection.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `targets` | list[str] | required | Up to 2000 usernames (without @) |
-| `profile_only` | bool | `false` | TURBO MODE: skip feed, only profile metadata |
-| `max_workers` | int | `20` | Parallel workers (1–100) |
-| `max_posts_per_profile` | int | `50` | Max posts per profile (ignored in TURBO) |
-| `since_date` / `until_date` | str | `""` | Date filters (DD.MM.YYYY, full mode only) |
-| `use_cookies` | bool | `false` | Use authenticated session |
-| `output_file` | str | `""` | Output path for final JSON |
-| `stream_jsonl` | bool | `true` | Append each completed profile to `output_file.jsonl` in real time |
-
-See the dedicated **Batch Scraping** section below for full guidance.
-
----
-
-### 🛠️ Server
-
-#### `instagram_server` 🌐
-
-Server diagnostics and cache management.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `action` | str | `"status"` | `status`, `clear_cache`, `clear_user`, or `reload_cookies` |
-| `username` | str | `""` | Target username for `clear_user` action |
-
-**Actions:**
-
-| Action | Effect |
-|--------|--------|
-| `status` | Cache hit rate, entry count, proxy health (per-proxy latency + success rate), rate limiter state |
-| `clear_cache` | Flush all cached data |
-| `clear_user` | Flush cache for one username only |
-| `reload_cookies` | Reload `cookies.txt` without restarting the server |
-
----
-
-## Batch Scraping
-
-`instagram_batch_scrape` operates in two distinct modes. Choosing the right mode is critical for speed.
-
-### TURBO MODE — `profile_only=True` (30–60x faster)
-
-Profile metadata only: followers, bio, posts_count, verified, category, website. **No posts are fetched.** Completes 1000 profiles in 30–60 seconds with healthy proxies.
-
-**Use when you need:**
-- Bulk follower/bio collection
-- Filtering verified or business profiles
-- "Top 50 largest accounts from a list of 1000"
-- Dead-check (falls back to posts_count == 0)
-
-```
-instagram_batch_scrape
-  targets=[...1000 usernames...]
-  profile_only=True
-  max_workers=80
-  output_file=/tmp/profiles.json
-```
-
-### FULL MODE — `profile_only=False` (default)
-
-Profile + feed posts + tags + dead detection + engagement data. Slower: 500 profiles × 50 posts ≈ 5–10 minutes with healthy proxies.
-
-**Use when you need:**
-- Engagement analysis
-- Tags/usertags per profile
-- Real dead-account check (post date based)
-- Date-range filtering
-
-```
-instagram_batch_scrape
-  targets=[...500 usernames...]
-  profile_only=False
-  max_workers=30
-  max_posts_per_profile=50
-  since_date="01.01.2026"
-  output_file=/tmp/full_profiles.json
-```
-
-### Worker Selection Guide
-
-| Proxy setup | TURBO (profile_only) | FULL mode |
-|-------------|---------------------:|----------:|
-| 0–1 proxy | 10–20 | 5–15 |
-| 5–10 proxies | 50–80 | 20–30 |
-| 20+ proxies | 80–100 | 40–50 |
-
-### Key Features
-
-- **Resume** — re-run with the same `output_file` to skip already-completed profiles
-- **Streaming JSONL** — `stream_jsonl=True` (default) appends each profile to `output_file.jsonl` in real time; `tail -f` friendly; memory-safe for huge batches
-- **Fail-fast** — auto-aborts when error rate exceeds 60% after 50+ completions (IP-ban or dead cookies signal)
-- **Aggregated JSON** — automatically disabled for batches >500 profiles (JSONL stream preferred); always written otherwise
-- **Date filtering** — `since_date`/`until_date` in DD.MM.YYYY format (full mode only)
-
----
-
-## Configuration
-
-All settings are configurable via environment variables.
-
-### Core Settings
+## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INSTAGRAM_MCP_COOKIES` | `""` | Path to `cookies.txt` for authenticated tools |
-| `INSTAGRAM_MCP_APP_ID` | `936619743392459` | Instagram x-ig-app-id header value |
-| `INSTAGRAM_MCP_IMPERSONATE` | `chrome142` | curl_cffi Chrome impersonation target |
+| `INSTAGRAM_MCP_COOKIES` | `""` | Path to `cookies.json` or `cookies.txt` |
+| `INSTAGRAM_MCP_PROXIES` | `""` | Comma-separated proxy URLs (or use `proxies.txt`, one per line) |
+| `INSTAGRAM_MCP_IMPERSONATE` | `chrome142` | curl_cffi impersonation profile |
 | `INSTAGRAM_MCP_TIMEOUT` | `10` | Per-request timeout in seconds |
-| `INSTAGRAM_MCP_MAX_RETRIES` | `3` | Max retries per request (each uses a different proxy) |
-| `INSTAGRAM_MCP_MAX_WORKERS` | `12` | Default concurrency for batch operations |
-| `INSTAGRAM_MCP_MAX_CLIENTS` | `50` | curl_cffi internal libcurl handle pool size |
-
-### Cache Settings
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `INSTAGRAM_MCP_CACHE_DISABLED` | `""` | Set `1` or `true` to disable all caching |
-| `INSTAGRAM_MCP_CACHE_TTL` | `300` | Global cache TTL override in seconds |
-| `INSTAGRAM_MCP_CACHE_MAX` | `500` | Maximum cache entries before LRU eviction |
-
-**Per-endpoint TTLs** (when cache is enabled):
-
-| Endpoint type | TTL | Rationale |
-|--------------|-----|-----------|
-| Profile | 300s | Bio/follower counts change infrequently |
-| Feed (per page) | 180s | New posts appear every few hours |
-| Stories | 120s | Stories expire and update frequently |
-| Highlights | 300s | Highlights change infrequently |
-| Hashtag | 300s | Top posts rotate slowly |
-| Comments | 60s | New comments arrive constantly |
-| Following/Followers | 300s | Follow graph changes infrequently |
-| Reels tab | 300s | New reels every few days |
-
-### Rate Limiting
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `INSTAGRAM_MCP_RATE_LIMIT_RPS` | `100.0` | Requests per second (token bucket fill rate) |
-| `INSTAGRAM_MCP_RATE_LIMIT_BURST` | `50` | Burst token count |
-| `INSTAGRAM_MCP_RATE_BACKOFF_FACTOR` | `0.7` | Multiply RPS by this on 429 response |
-| `INSTAGRAM_MCP_RATE_RECOVERY_FACTOR` | `1.15` | Multiply RPS by this on success |
-| `INSTAGRAM_MCP_CIRCUIT_BREAKER_THRESHOLD` | `5` | Consecutive 429s to open circuit breaker |
-| `INSTAGRAM_MCP_CIRCUIT_BREAKER_COOLDOWN` | `60.0` | Seconds to pause when circuit opens |
-| `INSTAGRAM_MCP_REQUEST_JITTER` | `0.1` | Max random jitter added to token-bucket sleep |
-
-### Proxy Settings
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `INSTAGRAM_MCP_PROXIES` | `""` | Comma-separated proxy URLs (or use `proxies.txt`) |
-| `INSTAGRAM_MCP_PROXY_MAX_FAILS` | `5` | Consecutive failures before proxy enters cooldown |
-| `INSTAGRAM_MCP_PROXY_COOLDOWN` | `30` | Proxy cooldown in seconds |
-| `INSTAGRAM_MCP_PROXY_MAX_COOLDOWN` | `300.0` | Maximum proxy cooldown in seconds |
-| `INSTAGRAM_MCP_PROXY_CB_FAIL_THRESHOLD` | `3` | Per-proxy circuit breaker failure threshold |
-| `INSTAGRAM_MCP_PROXY_MAX_CONCURRENT` | `30` | Per-proxy max concurrent requests (bulkhead) |
-| `INSTAGRAM_MCP_PER_PROXY_RPS` | `1.0` | Per-proxy token-bucket rate (req/s) |
-
-### Toolset Selection
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `INSTAGRAM_MCP_TOOLSETS` | `all` | Comma-separated toolset names to enable |
-| `INSTAGRAM_MCP_HIDE_AUTH_WHEN_NO_COOKIES` | `""` | Set `1` to hide auth-only tools when no cookies loaded |
-
-**Valid toolset names:** `profile`, `analysis`, `content`, `social_graph`, `social`, `batch`, `upload`, `download`, `server`, `all`
-
-The `social` toolset covers interaction tools: `instagram_delete_comment`, `instagram_publish_story`, `instagram_broadcast_channel`.
-
-The `server` toolset (`instagram_server`) is always enabled regardless of selection.
-
-### JSON Export
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `INSTAGRAM_MCP_EXPORT_ENABLED` | `""` | Set `0` or `false` to disable auto-export |
-| `INSTAGRAM_MCP_EXPORT_DIR` | `./exports` | Directory for saved JSON files |
-| `INSTAGRAM_MCP_EXPORT_INDENT` | `2` | JSON indentation spaces (0 = compact) |
-
-### Pagination
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `INSTAGRAM_MCP_MAX_PAGINATION` | `200` | Hard ceiling for feed pagination posts |
-| `INSTAGRAM_MCP_GRAPHQL_DOC_ID` | (internal) | GraphQL doc_id override for feed pagination |
+| `INSTAGRAM_MCP_EXPORT_DIR` | `./exports` | Auto-export directory for JSON results |
+| `INSTAGRAM_MCP_TOOLSETS` | `all` | Comma-separated toolsets to enable: `profile`, `analysis`, `content`, `social_graph`, `batch`, `server` |
+| `INSTAGRAM_MCP_HIDE_AUTH_WHEN_NO_COOKIES` | `""` | Set `1` to hide auth-only tools when no cookies are loaded |
+| `INSTAGRAM_MCP_CACHE_DISABLED` | `""` | Set `1` to disable all caching |
 
 ---
 
-## Proxy Setup
+## Tools
 
-Proxies are optional but strongly recommended for bulk operations.
+### 🌐 Profile & Feed
 
-### Supported formats
+| Tool | Description |
+|------|-------------|
+| `instagram_profile` | Profile metadata, feed tags (up to 12 posts), activity status |
+| `instagram_feed_deep` | Paginated feed — up to 200 posts with date filtering |
+| `instagram_bulk_check` | Check up to 20 accounts in parallel with activity status |
+| `instagram_compare_profiles` | Side-by-side comparison of 2–5 accounts |
 
-```
-http://user:pass@host:port
-http://host:port
-socks5://user:pass@host:port
-socks5://host:port
-```
+### 🌐 Analysis
 
-### Configuration methods
+| Tool | Description |
+|------|-------------|
+| `instagram_analyze_engagement` | ER%, content mix, best posting days, top hashtags across up to 200 posts |
+| `instagram_find_collab_network` | Map usertags, @mentions, co-authors, and paid sponsors across posts |
+| `instagram_account_report` | Full profile + engagement + collab network in one call |
+| `instagram_caption_analyze` | Caption patterns: avg length, hashtag density, emoji/CTA rates |
+| `instagram_compare_followers` | Compare follower/following sets — find unfollowers or non-mutuals |
 
-**Method 1: `proxies.txt`** (place in project root, one proxy per line)
-```
-# comments supported
-http://user:pass@proxy1.example.com:8080
-http://user:pass@proxy2.example.com:8080
-socks5://user:pass@proxy3.example.com:1080
-```
+### 🌐 Content
 
-**Method 2: Environment variable**
-```bash
-INSTAGRAM_MCP_PROXIES="http://user:pass@host1:8080,http://user:pass@host2:8080"
-```
+| Tool | Description |
+|------|-------------|
+| `instagram_post` | Full post details: location (GPS + Maps), music, usertags, coauthors |
+| `instagram_post_bulk` | Fetch up to 50 posts in parallel by shortcode or URL |
+| `instagram_post_comments` | Fetch comments with likes and thread structure (up to 500) |
 
-### Proxy behaviour
+### 🌐/🔐 Hashtag & Discovery
 
-- Round-robin selection with per-proxy health tracking
-- A proxy that fails `PROXY_MAX_FAILS` consecutive times enters cooldown
-- Cooldown starts at 30s and increases exponentially up to `PROXY_MAX_COOLDOWN`
-- If all proxies are in cooldown, auto-fallback to direct connection
-- Each retry in `max_retries` automatically uses a different proxy
-- Health stats visible via `instagram_server action=status`
+| Tool | Description |
+|------|-------------|
+| `instagram_hashtag` | Top posts for a hashtag — anon: 12 posts; auth: up to 300. Auto-upgrades. |
+| `instagram_hashtag_deep` | Top accounts, content breakdown, best posting hour across up to 500 posts |
+| `instagram_niche_top` | Account leaderboard for a hashtag ranked by engagement/post count/total likes |
+| `instagram_hashtag_suggest` | Related hashtag suggestions by analyzing top posts under a seed tag |
 
----
+### 🌐 Threads
 
-## Exports
+| Tool | Description |
+|------|-------------|
+| `instagram_threads_profile` | Profile metadata from Threads (threads.net) |
+| `instagram_threads_posts` | Recent posts for a Threads user |
 
-Every successful tool call saves a structured JSON file to `exports/`. Runs asynchronously — never blocks the tool response.
+### 🔐 Authenticated Feed & Activity
 
-### Directory structure
+| Tool | Description |
+|------|-------------|
+| `instagram_home_feed` | Your authenticated home feed |
+| `instagram_saved_posts` | Your bookmarked posts |
+| `instagram_liked_posts` | Posts you have liked |
+| `instagram_activity_feed` | Your recent activity notifications |
+| `instagram_post_likers` | Users who liked a specific post (up to ~98) |
 
-```
-exports/
-  index.json                         ← append-only log of every save
-  profile/
-    nike_2026-05-16_10-23-45.json
-  feed_deep/
-  engagement/
-  collab_network/
-  compare/
-  bulk_check/
-  batch_scrape/
-  tagged_by/
-  reposts/
-  post/
-  reels/
-  comments/
-  hashtag/
-  hashtag_deep/
-  search/
-  followers/
-  following/
-  post_likers/
-  stories/
-  highlights/
-  location_posts/
-  audio_reels/
-  post_bulk/
-  similar_accounts/
-  niche_top/
-  account_report/
-  upload_photo/
-```
+### 🔐 Discovery
 
-### File format
+| Tool | Description |
+|------|-------------|
+| `instagram_similar_accounts` | Accounts Instagram considers similar (internal chaining API) |
+| `instagram_search` | Search users + hashtags by keyword |
+| `instagram_user_search` | User search with higher-quality ranking (authenticated API) |
+| `instagram_user_id_lookup` | Look up a user's numeric ID by username |
 
-Each JSON file has three top-level keys:
+### 🔐 Social Graph
 
-```json
-{
-  "_meta": {
-    "tool": "profile",
-    "subject": "nike",
-    "saved_at": "2026-05-16T10:23:45.123456+00:00",
-    "saved_at_ts": 1747298625,
-    "duration_s": 1.247,
-    "server_version": "1.0.0"
-  },
-  "_summary": {
-    "tool": "profile",
-    "account": "@nike (Nike)",
-    "followers": "306.4M",
-    "verified": true,
-    "website": "nike.com",
-    "bio": "Just Do It.",
-    "status": "active",
-    "last_post_days": 2
-  },
-  "data": {
-    "profile": { ... },
-    "feed_tags": { ... },
-    "is_dead": false,
-    "last_post_days": 2
-  }
-}
-```
+| Tool | Description |
+|------|-------------|
+| `instagram_followers_list` | Recent followers with mutual follow status |
+| `instagram_following_list` | Full following list with close-friends detection |
+| `instagram_user_followers` | Paginated followers for any user by numeric user_id |
+| `instagram_user_following` | Paginated following for any user by numeric user_id |
+| `instagram_tagged_by` | Posts by other accounts that tag this account |
+| `instagram_reposts` | Content this account actively reposted |
 
-**`_meta`:** Provenance — tool name, subject, timestamp, request duration.
+### 🔐 Media
 
-**`_summary`:** AI-optimised overview tailored to each tool type. Covers 90% of use cases in a few lines.
+| Tool | Description |
+|------|-------------|
+| `instagram_reels` | Account's reels with play counts (only tool that exposes `play_count`) |
+| `instagram_stories` | Currently active stories (cached 2 min) |
+| `instagram_highlights` | Highlights tray + optional story items inside |
+| `instagram_audio_reels` | Reels using a specific audio track by `audio_cluster_id` |
+| `instagram_location_posts` | Top posts at a location by Instagram location ID or name |
+| `instagram_media_insights` | Impressions, reach, saves for your own posts (Business/Creator only) |
 
-**`data`:** Clean payload. Automatically strips: CDN URLs, redundant Unix timestamps (kept as `*_str`), empty strings/lists/dicts, technical size fields, always-false flags.
+### 🔐 Interactions
 
-**`index.json`:** Append-only log with tool, subject, filename, timestamp, and duration for every save.
+| Tool | Description |
+|------|-------------|
+| `instagram_post_like` | Like or unlike a post |
+| `instagram_post_save` | Save or unsave (bookmark) a post |
+| `instagram_post_comment` | Post a comment |
+| `instagram_comment_reply` | Reply to a comment |
+| `instagram_comment_like` | Like or unlike a comment |
+| `instagram_comment_hide` | Hide a comment on your own post |
+| `instagram_delete_comment` | Delete a comment |
+| `instagram_toggle_comments` | Disable or enable comments on your post |
+| `instagram_post_delete` | Delete one of your own posts |
+| `instagram_follow_user` | Follow or unfollow a user |
+| `instagram_block_user` | Block or unblock a user |
+| `instagram_account_privacy` | Switch account between public and private |
+| `instagram_edit_profile` | Edit bio, display name, website, email, or phone |
+| `instagram_publish_story` | Publish a photo as a Story (24h) |
+| `instagram_story_mark_seen` | Mark stories as viewed |
+| `instagram_story_reply` | Reply to a story via DM |
 
----
+### 🔐 DM
 
-## Quick Examples
+| Tool | Description |
+|------|-------------|
+| `instagram_dm_inbox` | Read DM inbox (threads list) |
+| `instagram_dm_thread` | Fetch messages in a specific thread |
+| `instagram_dm_send` | Send a text message |
+| `instagram_dm_send_photo` | Send a photo |
+| `instagram_dm_send_video` | Send a video |
+| `instagram_dm_media_messages` | Fetch media messages in a thread |
+| `instagram_dm_react` | Add or remove an emoji reaction on a message |
+| `instagram_dm_unsend` | Delete a sent message |
+| `instagram_dm_mute` | Mute or unmute a thread |
+| `instagram_dm_share_post` | Share a post to a DM thread |
+| `instagram_dm_mark_seen` | Mark a thread as seen |
 
-| Prompt | Correct tool |
-|--------|-------------|
-| "Scrape the nike profile" | `instagram_profile username=nike` |
-| "Get 100 posts from cristiano" | `instagram_feed_deep username=cristiano max_posts=100` |
-| "What's the engagement rate for @adidas" | `instagram_analyze_engagement username=adidas` |
-| "Who does @leomessi collaborate with" | `instagram_find_collab_network username=leomessi` |
-| "Compare nike, adidas, puma" | `instagram_compare_profiles usernames=[nike,adidas,puma]` |
-| "Check if these 20 accounts are alive" | `instagram_bulk_check usernames=[...]` |
-| "Follower counts only for 1000 profiles" | `instagram_batch_scrape profile_only=True max_workers=80` |
-| "Scrape 500 profiles with their posts from March 2026" | `instagram_batch_scrape profile_only=False since_date="01.03.2026" until_date="31.03.2026"` |
-| "Top posts for #football" | `instagram_hashtag tag=football` |
-| "Who dominates the #fitness niche?" | `instagram_niche_top tag=fitness max_posts=200` |
-| "Deep analysis of #travel hashtag" | `instagram_hashtag_deep tag=travel max_posts=300` |
-| "Get details on these 5 posts at once" | `instagram_post_bulk shortcodes=[sc1,sc2,sc3,sc4,sc5]` |
-| "Accounts similar to @gymshark" | `instagram_similar_accounts username=gymshark` |
-| "Full report on @cristiano" | `instagram_account_report username=cristiano` |
-| "What stories does @nike have right now" | `instagram_stories username=nike` |
-| "Download all slides from this carousel" | `instagram_download post=DXjuqH9nDVE save_dir=/tmp/media` |
-| "Post this photo to Instagram" | `instagram_upload_photo images=[/path/to/photo.jpg] caption="caption text"` |
-| "Clear the cache for @nike" | `instagram_server action=clear_user username=nike` |
-| "Check proxy and cache health" | `instagram_server action=status` |
-| "Like this post" | `instagram_post_like media_id=3612076889987614897` |
-| "Save this post for later" | `instagram_post_save media_id=3612076889987614897` |
-| "Comment 'Great work!' on this post" | `instagram_post_comment media_id=3612076889987614897 text="Great work!"` |
-| "Follow user 47689974259" | `instagram_follow_user user_id=47689974259` |
-| "Unfollow user 47689974259" | `instagram_follow_user user_id=47689974259 action=unfollow` |
-| "Upload a reel" | `instagram_upload_reel video_path=/tmp/video.mp4 caption="My reel"` |
-| "Publish a story" | `instagram_publish_story image_path=/tmp/photo.jpg` |
-| "Search for users named 'john'" | `instagram_user_search query=john count=20` |
-| "Get @natgeo's Threads profile" | `instagram_threads_profile username=natgeo` |
-| "Get recent Threads posts for @zuck" | `instagram_threads_posts username=zuck` |
+### 🔐 Upload & Download
 
----
+| Tool | Description |
+|------|-------------|
+| `instagram_upload_photo` | Upload 1–10 images as a post or carousel |
+| `instagram_upload_reel` | Upload an MP4 as a Reel |
+| `instagram_upload_video` | Upload an MP4 as a regular video post |
+| `instagram_download` | Download all media from a post (single/video/carousel) to local disk |
 
-## Architecture
+### 🔐 Broadcast & Automation
 
-### Component Map
+| Tool | Description |
+|------|-------------|
+| `instagram_broadcast_channel` | Read a creator's Broadcast Channel (info or messages) |
+| `instagram_schedule` | Schedule posts for future publishing (`add`/`list`/`cancel`/`status`) |
+| `instagram_monitor` | Poll accounts for new posts; fire webhooks on new post |
+| `instagram_sessions` | Manage multiple accounts via `INSTAGRAM_MCP_COOKIES_<ALIAS>` env vars |
+| `instagram_oauth` | Full Graph API OAuth 2.0 flow (`init_flow`/`exchange_code`/`refresh_token`/`status`) |
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     MCP CLIENT (Claude / AI)                    │
-└─────────────────────┬───────────────────────────────────────────┘
-                      │ MCP Protocol (stdio / HTTP-SSE)
-┌─────────────────────▼───────────────────────────────────────────┐
-│                  FastMCP Server  (mcp.server.fastmcp)           │
-│                                                                 │
-│  tools.py ── 58 tool handlers (async, ctx: Context)             │
-│  models.py ── Pydantic input validation + dataclasses           │
-│  formatter.py ── Markdown output generation                     │
-│  exporter.py ── AI-optimised JSON auto-save                     │
-└──────┬──────────────────────────────────────────────────────────┘
-       │
-┌──────▼──────────────────────────────────────────────────────────┐
-│                   InstagramClient (client.py)                   │
-│                                                                 │
-│  fetch_user()          fetch_feed_items()    fetch_stories()    │
-│  fetch_comments()      fetch_reels()         fetch_highlights() │
-│  fetch_hashtag()       fetch_followers()     fetch_following()  │
-│  fetch_location_posts() fetch_audio_reels()  fetch_post()      │
-│  fetch_search()        fetch_post_likers()   fetch_post_bulk() │
-│  fetch_similar_accounts() fetch_media_info() upload_photo()    │
-│                                                                 │
-│  _get_session()  ──── SmartCache ──── AdaptiveRateLimiter       │
-│  _get_auth_session()── CookieManager ─ ProxyManager             │
-└──────┬──────────────────────────────────────────────────────────┘
-       │  curl_cffi AsyncSession (Chrome TLS impersonation)
-┌──────▼──────────────────────────────────────────────────────────┐
-│                    Instagram APIs                               │
-│                                                                 │
-│  www.instagram.com/api/v1/   ── profile, feed, post, comments  │
-│  i.instagram.com/api/v1/     ── hashtag, location, audio, auth │
-│  www.instagram.com/graphql/  ── reels tab (GraphQL doc_id)     │
-│  www.instagram.com/api/v1/   ── stories, highlights, search    │
-└─────────────────────────────────────────────────────────────────┘
-```
+### 🌐 Batch & Server
 
-### Request Lifecycle
-
-1. **Tool handler** validates input via Pydantic, calls `client.fetch_*()`.
-2. **SmartCache** checks for a cached response (endpoint-specific TTL).
-3. **AdaptiveRateLimiter** enforces token-bucket rate limiting with jitter; auto-backs off on 429, opens circuit breaker after 5 consecutive 429s.
-4. **ProxyManager** selects the next healthy proxy (round-robin with per-proxy circuit breaker); falls back to direct if all proxies are in cooldown.
-5. **curl_cffi AsyncSession** makes the request with Chrome TLS fingerprint. Two session types: `_get_session()` (anonymous, proxy-aware) and `_get_auth_session()` (single authenticated session with cookies).
-6. On success: response cached, rate limiter recovery applied, result returned.
-7. On 429: rate multiplied by 0.7, proxy rotated, retry (up to `max_retries`).
-8. **Formatter** converts result to Markdown for the MCP response.
-9. **JsonExporter** asynchronously saves the result to `exports/{tool}/{subject}_{timestamp}.json`.
-
-### Key Design Decisions
-
-- **`curl_cffi` with Chrome impersonation** bypasses TLS fingerprinting. Instagram blocks `requests` and `aiohttp` by JA3/JA4 hash.
-- **Two session types** prevent session contamination: anonymous sessions use a proxy pool; authenticated sessions use a single stable session with cookies.
-- **`i.instagram.com`** is used for hashtag sections, location sections, and audio reels — these endpoints require `ig_user_agent` + `x-ig-app-id` headers not exposed on `www.instagram.com`.
-- **GraphQL** is used only for the reels tab (`PolarisProfileReelsTabContentQuery_connection`) because the REST API does not expose play counts.
-- **All tool handlers are async** with `ctx: Context` for MCP-native progress reporting.
-- **`ToolError` for all errors** — never raises Python exceptions; always returns `isError=true` in the MCP protocol response with an LLM-readable message and suggested action.
+| Tool | Description |
+|------|-------------|
+| `instagram_batch_scrape` | Scrape up to 2000 profiles; `profile_only=True` gives 30–60× speedup |
+| `instagram_server` | Diagnostics and cache management (`status`/`clear_cache`/`clear_user`/`reload_cookies`) |
 
 ---
 
 ## Limitations
 
-- **Private accounts:** Profile metadata is always accessible; feed, posts, stories, and highlights are not visible without following the account.
-- **Follower lists:** Instagram restricts follower pagination to ~50 users for third-party access. Full pagination only works on the authenticated account's own followers list.
-- **Play counts:** Only available via `instagram_reels`. The standard feed API does not return `play_count`.
-- **Comments:** Very active posts may return fewer comments than requested — Instagram caps the returned count.
-- **Rate limits:** Anonymous requests share a pool per IP. Heavy use without proxies will trigger 429 responses. The adaptive rate limiter handles backoff automatically.
-- **Session expiry:** `cookies.txt` sessions expire. Long-running deployments need periodic cookie refresh. Use `instagram_server action=reload_cookies` to refresh without restarting.
-- **Write operations:** Like, comment, follow, block, save, edit profile, publish story, upload reel, and DM reactions all require a valid authenticated session. Rate limiting applies — avoid rapid consecutive write calls.
-- **Carousel media:** `instagram_download` fetches all slides; `instagram_feed_deep` returns only the slide count.
-- **Historical data:** Instagram does not expose posts older than the account's paginated feed allows.
+- **Private accounts:** Feed, posts, stories, and highlights are not accessible without following the account.
+- **Follower pagination:** Restricted to ~50 for other accounts; unlimited only for your own account.
+- **Play counts:** Only `instagram_reels` exposes `play_count` — the standard feed API omits it.
+- **Session expiry:** Cookies expire. Use `instagram_server action=reload_cookies` to refresh without restarting.
+- **Write operations:** Like, comment, follow, upload, DM actions — rate limits apply. Avoid rapid consecutive writes.
+- **Anonymous hashtag blocks:** Some hashtags (#swimwear, #fitness, etc.) block anonymous HTML scraping.
+- **Account restrictions:** Comment, reply, and follow may return "something went wrong" on new or restricted accounts — this is Instagram-side, not a bug.
 
 ---
 
 ## FAQ
 
-**Q: Do I need to log in to use this?**
+**Do I need to log in?**  
+No. 28 tools work anonymously with no credentials. 48 tools require `cookies.json`. `instagram_hashtag` auto-switches based on whether cookies are present.
 
-No. 28 tools work completely anonymously with no account or cookies required. 29 tools require a `cookies.json` file. `instagram_hashtag` automatically switches between anon and auth modes depending on whether cookies are present.
+**Why `curl_cffi` instead of `requests`?**  
+Instagram blocks `requests` and `aiohttp` at the TLS handshake level by JA3/JA4 fingerprint. `curl_cffi` impersonates Chrome's TLS stack, bypassing this check.
 
-**Q: Why use `curl_cffi` instead of `requests` or `aiohttp`?**
+**How do I get play counts for reels?**  
+Use `instagram_reels`. The standard feed API (`instagram_feed_deep`) does not include `play_count`.
 
-Instagram blocks `requests` and `aiohttp` at the TLS handshake level by inspecting the TLS fingerprint (JA3/JA4 hash). `curl_cffi` impersonates a real Chrome browser's TLS stack, making the connection indistinguishable from a genuine browser request.
+**What happens on rate limiting?**  
+The adaptive rate limiter detects 429s, backs off (×0.7 RPS), rotates proxy, and retries. After 5 consecutive 429s the circuit breaker opens for 60s.
 
-**Q: How do I get play counts for reels?**
+**How do I use multiple Instagram accounts?**  
+Set `INSTAGRAM_MCP_COOKIES_<ALIAS>` env vars (e.g., `INSTAGRAM_MCP_COOKIES_BRAND=cookies_brand.json`). Use `instagram_sessions action=list` to see available sessions.
 
-Use `instagram_reels`. The standard feed API (`instagram_feed_deep`) does not include `play_count` in its response. The reels tab uses a separate GraphQL endpoint that exposes this field.
+**Are `exports/` files safe to commit?**  
+No — they may contain PII. Add `exports/` to `.gitignore`.
 
-**Q: Why does `instagram_hashtag` return only 12 posts in anon mode?**
-
-The anonymous mode parses the public HTML of `instagram.com/explore/tags/{tag}/`, which renders exactly 12 posts as a static page. The full paginated API requires authentication. With cookies, `instagram_hashtag` returns up to 300 posts.
-
-**Q: What happens when Instagram rate-limits the server?**
-
-The `AdaptiveRateLimiter` detects 429 responses and automatically multiplies the rate by 0.7, rotates to the next proxy, and retries. After 5 consecutive 429s, the circuit breaker opens and all requests pause for 60 seconds. The tool returns a `rate_limited` error with a suggested action to wait and retry.
-
-**Q: Can I run multiple tool calls in parallel?**
-
-Yes. The server handles concurrent requests. For bulk operations, use `instagram_bulk_check` (up to 20 profiles) or `instagram_batch_scrape` (up to 2000 profiles) — these manage concurrency internally. Avoid issuing many simultaneous manual calls without proxies, as this concentrates all requests on a single IP.
-
-**Q: Are exported JSON files safe to commit to git?**
-
-No. They may contain personally identifiable information. Add `exports/` to your `.gitignore`. The files are intended for local AI analysis workflows.
-
-**Q: How do I refresh cookies without restarting the server?**
-
-Use `instagram_server action=reload_cookies`. This reloads the `cookies.txt` file and resets the authenticated session so the next auth-tool call picks up the new cookies.
+**How do I refresh cookies without restarting?**  
+`instagram_server action=reload_cookies`

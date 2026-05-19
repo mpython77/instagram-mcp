@@ -4987,13 +4987,16 @@ def register_tools(
                 shortcode = data.get("shortcode", "")
                 media_id = data.get("media_id", "")
                 url = f"https://www.instagram.com/p/{shortcode}/" if shortcode else ""
-                return format_upload_result_markdown(
-                    "video feed post",
-                    shortcode=shortcode,
-                    media_id=media_id,
-                    url=url,
-                    caption=params.caption,
-                )
+                lines = ["**Video post published successfully!**"]
+                if url:
+                    lines.append(f"URL: {url}")
+                if media_id:
+                    lines.append(f"media_id: {media_id}")
+                if shortcode:
+                    lines.append(f"shortcode: `{shortcode}`")
+                if params.caption:
+                    lines.append(f"Caption: {params.caption[:80]}{'...' if len(params.caption) > 80 else ''}")
+                return "\n".join(lines)
             except Exception as e:
                 raise _exception_to_tool_error(e)
 

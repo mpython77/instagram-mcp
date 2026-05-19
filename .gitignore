@@ -34,12 +34,15 @@ data/
 preview.txt
 o.json.jsonl
 
-# Temporary & Debug Scripts
-debug_*.py
-test_*.py
-run_test*.py
-check_html.py
-send_dm_api.py
+# Temporary & Debug Scripts (root-level only)
+/debug_*.py
+/test_*.py
+/run_test*.py
+/check_html.py
+/send_dm_api.py
+
+# Local AI tool settings
+.gemini/
 
 # Logs & Tests
 *.log
