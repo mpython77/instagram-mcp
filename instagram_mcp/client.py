@@ -5235,7 +5235,10 @@ class InstagramClient:
             resp = await session.get(
                 f"https://www.instagram.com/api/v1/users/{value}/usernameinfo/",
                 headers={"x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id, "User-Agent": mobile_ua},
+                allow_redirects=False,
             )
+            if resp.status_code in (301, 302, 303, 307, 308):
+                raise FetchError("user_id_lookup: redirected (session rate-limited)")
             if resp.status_code not in (200, 201):
                 raise FetchError(f"user_id_lookup: HTTP {resp.status_code}: {resp.text[:200]}")
             try:
@@ -5255,7 +5258,10 @@ class InstagramClient:
             resp = await session.get(
                 f"https://www.instagram.com/api/v1/users/{value}/info/",
                 headers={"x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id, "User-Agent": mobile_ua},
+                allow_redirects=False,
             )
+            if resp.status_code in (301, 302, 303, 307, 308):
+                raise FetchError("user_id_lookup: redirected (session rate-limited)")
             if resp.status_code not in (200, 201):
                 raise FetchError(f"user_id_lookup: HTTP {resp.status_code}: {resp.text[:200]}")
             try:
@@ -5532,14 +5538,17 @@ class InstagramClient:
         session = await self._get_auth_session()
         csrf = (cm.cookies.get("csrftoken", "")) or ""
 
-        # Get current profile first
+        # Get current profile first — abort if fetch fails to avoid wiping existing fields
         my_id = (cm.cookies.get("ds_user_id", "")) or ""
         info_resp = await session.get(
             f"https://www.instagram.com/api/v1/users/{my_id}/info/",
             headers={"x-csrftoken": csrf, "x-ig-app-id": "936619743392459", "Cookie": self._cookie_str()},
+            allow_redirects=False,
         )
         current: Dict[str, Any] = {}
-        if info_resp.status_code == 200:
+        if info_resp.status_code in (301, 302, 303, 307, 308):
+            raise FetchError("edit_profile: session redirected — cannot fetch current profile to preserve fields")
+        if info_resp.status_code == 200 and not info_resp.text.lstrip().startswith("<"):
             try:
                 current = info_resp.json().get("user") or {}
             except Exception:
