@@ -3688,8 +3688,11 @@ class InstagramClient:
                 "https://www.instagram.com/api/v1/direct_v2/inbox/",
                 params=params,
                 headers={"x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id},
+                allow_redirects=False,
             )
             status = resp.status_code
+            if status in (301, 302, 303, 307, 308):
+                raise FetchError("DM inbox: redirected — session may be expired or rate-limited")
             if status in (401, 403):
                 raise FetchError("DM inbox: session expired. Re-export cookies.txt.")
             if status != 200:
@@ -3762,8 +3765,11 @@ class InstagramClient:
                 f"https://www.instagram.com/api/v1/direct_v2/threads/{thread_id}/",
                 params=params,
                 headers={"x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id},
+                allow_redirects=False,
             )
             status = resp.status_code
+            if status in (301, 302, 303, 307, 308):
+                raise FetchError("DM thread: redirected — session may be expired or rate-limited")
             if status in (401, 403):
                 raise FetchError("DM thread: session expired. Re-export cookies.")
             if status == 404:
