@@ -1308,3 +1308,76 @@ async def test_liked_posts_redirected(client):
         mock_session.get = AsyncMock(return_value=mock_resp)
         with pytest.raises(FetchError, match="redirected"):
             await client.liked_posts(limit=5)
+
+
+@pytest.mark.asyncio
+async def test_resolve_dm_thread_igid_sends_cookie_in_step1(client):
+    """resolve_dm_thread_igid step-1 inbox lookup must include Cookie header.
+    Without it the request goes out unauthenticated and returns an empty inbox."""
+    calls = []
+
+    # Step 1 returns 200 with an empty inbox (no matching thread)
+    inbox_resp = MagicMock()
+    inbox_resp.status_code = 200
+    inbox_resp.json.return_value = {"inbox": {"threads": []}}
+    inbox_resp.text = '{"inbox": {"threads": []}}'
+
+    # Step 2 returns a valid profile (so we can proceed)
+    profile_resp = MagicMock()
+    profile_resp.status_code = 200
+    profile_resp.text = '{"data": {"user": {"id": "12345"}}}'
+    profile_resp.json.return_value = {"data": {"user": {"id": "12345"}}}
+
+    # get_or_create returns a thread
+    create_resp = MagicMock()
+    create_resp.status_code = 200
+    create_resp.text = '{"status": "ok", "thread": {"thread_v2_id": "abc123"}}'
+    create_resp.json.return_value = {"status": "ok", "thread": {"thread_v2_id": "abc123"}}
+
+    async def mock_get(url, **kwargs):
+        calls.append(("get", url, kwargs))
+        if "direct_v2/inbox" in url:
+            return inbox_resp
+        return profile_resp
+
+    async def mock_post(url, **kwargs):
+        return create_resp
+
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.get = mock_get
+        mock_session.post = mock_post
+        with patch.object(client, "_cookie_str", return_value="sessionid=abc"):
+            result = await client.resolve_dm_thread_igid("testuser")
+
+    # Verify that step 1 (inbox lookup) included the Cookie header
+    step1_call = next((c for c in calls if "direct_v2/inbox" in c[1]), None)
+    assert step1_call is not None, "Step 1 inbox GET was never called"
+    headers = step1_call[2].get("headers", {})
+    assert "Cookie" in headers, "Step 1 inbox GET missing Cookie header"
+    assert headers["Cookie"] == "sessionid=abc"
+
+
+@pytest.mark.asyncio
+async def test_resolve_dm_thread_igid_raises_on_step2_redirect(client):
+    """resolve_dm_thread_igid step-2 must raise FetchError on 302, not try resp.json()."""
+    inbox_resp = MagicMock()
+    inbox_resp.status_code = 302
+    inbox_resp.text = ""
+    inbox_resp.json.return_value = {}
+
+    redirect_resp = MagicMock()
+    redirect_resp.status_code = 302
+    redirect_resp.text = ""
+
+    async def mock_get(url, **kwargs):
+        if "direct_v2/inbox" in url:
+            return inbox_resp
+        return redirect_resp
+
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.get = mock_get
+        with patch.object(client, "_cookie_str", return_value="sessionid=abc"):
+            with pytest.raises(FetchError, match="redirected"):
+                await client.resolve_dm_thread_igid("testuser")

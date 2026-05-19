@@ -4013,9 +4013,11 @@ class InstagramClient:
         username_lower = username.lower()
 
         # Step 1: Search inbox for existing thread
+        _ck = self._cookie_str()
         inbox_resp = await session.get(
             "https://www.instagram.com/api/v1/direct_v2/inbox/?limit=40",
-            headers={"x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id},
+            headers={"x-csrftoken": csrf, "x-ig-app-id": self._config.ig_app_id, "Cookie": _ck},
+            allow_redirects=False,
         )
         if inbox_resp.status_code == 200:
             try:
@@ -4031,11 +4033,13 @@ class InstagramClient:
                 pass
 
         # Step 2: Get user_id, then get_or_create via www
-        _ck = self._cookie_str()
         resp = await session.get(
             f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}",
             headers={"x-ig-app-id": self._config.ig_app_id, "x-csrftoken": csrf, "Cookie": _ck},
+            allow_redirects=False,
         )
+        if resp.status_code in (301, 302, 303, 307, 308):
+            raise FetchError(f"resolve_dm_thread_igid: redirected (session rate-limited) for '{username}'")
         if resp.status_code != 200:
             raise FetchError(f"Could not fetch profile for '{username}': HTTP {resp.status_code}")
         try:

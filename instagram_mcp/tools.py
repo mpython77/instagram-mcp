@@ -4003,7 +4003,7 @@ def register_tools(
     # TOOL: instagram_delete_comment
     # ─────────────────────────────────────────────────────────────────────────
 
-    if _enabled("social", requires_auth=True):
+    if _enabled("social_graph", requires_auth=True):
 
         @mcp.tool(
             name="instagram_delete_comment",
@@ -4039,7 +4039,7 @@ def register_tools(
     # TOOL: instagram_publish_story
     # ─────────────────────────────────────────────────────────────────────────
 
-    if _enabled("social", requires_auth=True):
+    if _enabled("social_graph", requires_auth=True):
 
         @mcp.tool(
             name="instagram_publish_story",
@@ -4078,7 +4078,7 @@ def register_tools(
     # TOOL: instagram_broadcast_channel
     # ─────────────────────────────────────────────────────────────────────────
 
-    if _enabled("social", requires_auth=True):
+    if _enabled("social_graph", requires_auth=True):
 
         @mcp.tool(
             name="instagram_broadcast_channel",
