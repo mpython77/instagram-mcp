@@ -2,7 +2,7 @@
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![MCP](https://img.shields.io/badge/MCP-compatible-green) ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey) [![CI](https://github.com/mpython77/instagram-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mpython77/instagram-mcp/actions/workflows/ci.yml) [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/mpython77/instagram-mcp/pkgs/container/instagram-mcp)
 
-Production-grade MCP server for Instagram. **77 tools** — 28 anonymous (no credentials), 48 authenticated, 1 auto-mode. Built on `curl_cffi` with Chrome TLS impersonation, adaptive rate limiting, and smart caching.
+Production-grade MCP server for Instagram. **79 tools** — 30 anonymous (no credentials), 48 authenticated, 1 auto-mode. Built on `curl_cffi` with Chrome TLS impersonation, adaptive rate limiting, smart caching, multi-account pool, and challenge/2FA resolver.
 
 Works with **Claude Desktop**, **Claude Code**, and any MCP-compatible AI client.
 
@@ -135,6 +135,7 @@ docker run -d \
 | `instagram_account_report` | Full profile + engagement + collab network in one call |
 | `instagram_caption_analyze` | Caption patterns: avg length, hashtag density, emoji/CTA rates |
 | `instagram_compare_followers` | Compare follower/following sets — find unfollowers or non-mutuals |
+| `instagram_analyze_comments` | Sentiment analysis on comments — pos/neu/neg, emoji stats, keywords (EN/UZ/RU) |
 
 ### 🌐 Content
 
@@ -263,6 +264,7 @@ docker run -d \
 |------|-------------|
 | `instagram_batch_scrape` | Scrape up to 2000 profiles; `profile_only=True` gives 30–60× speedup |
 | `instagram_server` | Diagnostics and cache management (`status`/`clear_cache`/`clear_user`/`reload_cookies`) |
+| `instagram_submit_verification_code` | Submit SMS/Email/2FA code to resolve a pending checkpoint and restore the session |
 
 ---
 
