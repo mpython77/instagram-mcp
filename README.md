@@ -290,7 +290,7 @@ docker run -d \
 ## FAQ
 
 **Do I need to log in?**  
-No. 28 tools work anonymously with no credentials. 48 tools require `cookies.json`. `instagram_hashtag` auto-switches based on whether cookies are present.
+No. 30 tools work anonymously with no credentials. 48 tools require `cookies.json`. `instagram_hashtag` auto-switches based on whether cookies are present.
 
 **Why `curl_cffi` instead of `requests`?**  
 Instagram blocks `requests` and `aiohttp` at the TLS handshake level by JA3/JA4 fingerprint. `curl_cffi` impersonates Chrome's TLS stack, bypassing this check.
