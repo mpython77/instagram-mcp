@@ -29,6 +29,7 @@ response.txt
 exports/
 data/
 *.json
+!.well-known/**/*.json
 *.jsonl
 *.txt
 preview.txt
