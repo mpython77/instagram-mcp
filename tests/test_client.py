@@ -171,10 +171,11 @@ async def test_invalidate_session(client):
 async def test_close(client):
     with patch("instagram_mcp.client.JitterAsyncSession") as mock_session_cls:
         mock_session = AsyncMock()
+        mock_session.cookies = MagicMock()  # sync mock so cookies.set() doesn't produce unawaited coroutine
         mock_session_cls.return_value = mock_session
         await client._get_session(None)
         await client._get_auth_session()
-        
+
         await client.close()
         assert client._closed
         assert mock_session.close.call_count >= 2

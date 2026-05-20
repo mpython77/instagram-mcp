@@ -353,24 +353,23 @@ async def test_run_loop_exceptions():
     cfg = BatchConfig(targets_file="t.txt", output_file="o.json")
     client = AsyncMock()
     runner = BatchRunner(cfg, client)
-    
+
     runner._load_targets = MagicMock(return_value=["u1", "u2"])
     runner._load_progress = MagicMock(return_value=set())
     runner._load_existing_results = MagicMock(return_value={})
     runner._save_progress = MagicMock()
-    
-    async def mock_coro_cancel():
-        raise asyncio.CancelledError()
-        
-    async def mock_coro_exc():
+
+    call_count = 0
+
+    async def mock_scrape(username):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise asyncio.CancelledError()
         raise Exception("generic error")
-        
-    def mock_as_completed(tasks):
-        yield mock_coro_cancel()
-        yield mock_coro_exc()
-        
-    with patch("instagram_mcp.batch_runner.asyncio.as_completed", side_effect=mock_as_completed):
-        await runner.run()
+
+    runner._scrape_one_no_semaphore = mock_scrape
+    await runner.run()
 
 @pytest.mark.asyncio
 async def test_run_signal_setup():
