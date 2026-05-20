@@ -36,6 +36,8 @@ data/
 preview.txt
 o.json.jsonl
 
+scratch/
+
 # Temporary & Debug Scripts (root-level only)
 /debug_*.py
 /test_*.py
