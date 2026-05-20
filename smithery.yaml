@@ -1,5 +1,5 @@
 name: instagram-mcp
-version: "2.1.0"
+version: "2.1.2"
 description: >
   Production-grade MCP server for Instagram. 79 tools — 30 anonymous (no credentials),
   48 authenticated, 1 auto-mode. Profile scraping, engagement analytics, DM inbox/send,

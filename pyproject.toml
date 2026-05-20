@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "instamcp"
-version = "2.1.1"
+version = "2.1.2"
 description = "Production-grade MCP server for Instagram — 79 tools: scraping, DMs, scheduling, uploads, social actions, sentiment analysis, multi-account pool"
 readme = "README.md"
 requires-python = ">=3.10"
