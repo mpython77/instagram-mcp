@@ -34,6 +34,7 @@ from .exceptions import AuthError, FetchError
 from .models import DateRange
 from .proxy_manager import ProxyManager
 from .rate_limiter import AdaptiveRateLimiter
+from .account_pool import AccountPool
 
 # curl_cffi async — preferred, no thread pool needed
 try:
@@ -42,6 +43,8 @@ try:
 except ImportError:  # pragma: no cover
     AsyncSession = None  # type: ignore
     CURL_CFFI_AVAILABLE = False
+
+from .delay import DelaySimulator, JitterAsyncSession
 
 logger = logging.getLogger("instagram_mcp.client")
 
@@ -82,6 +85,17 @@ class InstagramClient:
         self._rate_limiter = rate_limiter
         self._cache = cache
         self._cookie_manager = cookie_manager
+        self._delay_simulator = DelaySimulator(
+            min_delay_ms=getattr(config, "delay_min_ms", 500),
+            max_delay_ms=getattr(config, "delay_max_ms", 2000),
+            enabled=True
+        )
+        self._account_pool = AccountPool(accounts_dir=config.accounts_dir)
+        self._account_pool.load_accounts()
+        from .media_cache import MediaCache
+        self._media_cache = MediaCache(cache_dir=config.media_cache_dir)
+        # Authenticated sessions pool for multi-accounts, keyed by account alias
+        self._auth_sessions: Dict[str, AsyncSession] = {}
         # Anonymous session pool, keyed by proxy URL (or "direct"); guarded by lock
         self._session_pool: Dict[str, AsyncSession] = {}
         self._session_pool_lock = asyncio.Lock()
@@ -112,6 +126,74 @@ class InstagramClient:
     def cookie_manager(self) -> Optional[CookieManager]:
         return self._cookie_manager
 
+    @property
+    def account_pool(self) -> AccountPool:
+        return self._account_pool
+
+    @property
+    def media_cache(self):
+        return self._media_cache
+
+    async def cache_media_urls(self, data: Any) -> Any:
+        """Scan data for media URLs, download them, and replace with local file URIs."""
+        # Get/reuse a session from the direct pool safely, handling unit test mocks
+        from unittest.mock import MagicMock
+        try:
+            session_or_future = self._get_session(None)
+            if asyncio.iscoroutine(session_or_future) or hasattr(session_or_future, "__await__"):
+                session = await session_or_future
+            else:
+                session = session_or_future
+        except Exception:
+            session = None
+
+        if not session or isinstance(session, MagicMock):
+            return data
+        
+        # Helper to avoid duplicating logic
+        async def _cache_val(val: str) -> str:
+            if not val or not val.startswith("http"):
+                return val
+            return await self._media_cache.get_or_fetch(val, session)
+
+        from .models import InstagramProfile, InstagramPost, FeedTagResult, TaggedPost, StoryItem, ReelItem
+
+        if isinstance(data, InstagramProfile):
+            if data.profile_pic_url:
+                data.profile_pic_url = await _cache_val(data.profile_pic_url)
+        elif isinstance(data, InstagramPost):
+            if data.display_url:
+                data.display_url = await _cache_val(data.display_url)
+            if data.thumbnail_url:
+                data.thumbnail_url = await _cache_val(data.thumbnail_url)
+        elif isinstance(data, TaggedPost):
+            if data.display_url:
+                data.display_url = await _cache_val(data.display_url)
+        elif isinstance(data, StoryItem):
+            if data.display_url:
+                data.display_url = await _cache_val(data.display_url)
+            if data.video_url:
+                data.video_url = await _cache_val(data.video_url)
+        elif isinstance(data, ReelItem):
+            if data.display_url:
+                data.display_url = await _cache_val(data.display_url)
+            if data.thumbnail_url:
+                data.thumbnail_url = await _cache_val(data.thumbnail_url)
+        elif isinstance(data, FeedTagResult):
+            for post in data.posts:
+                await self.cache_media_urls(post)
+        elif isinstance(data, list):
+            for item in data:
+                await self.cache_media_urls(item)
+        elif isinstance(data, dict):
+            for k, v in list(data.items()):
+                if isinstance(v, (str, list, dict, InstagramProfile, InstagramPost, TaggedPost, StoryItem, ReelItem, FeedTagResult)):
+                    if isinstance(v, str) and k in ("profile_pic_url", "display_url", "thumbnail_url", "video_url"):
+                        data[k] = await _cache_val(v)
+                    else:
+                        await self.cache_media_urls(v)
+        return data
+
     # ── Session management ───────────────────────────────────────────────────
 
     async def _get_session(self, proxy_url: Optional[str]) -> AsyncSession:
@@ -127,12 +209,13 @@ class InstagramClient:
             proxies = (
                 {"http": proxy_url, "https": proxy_url} if proxy_url else None
             )
-            session = AsyncSession(
+            session = JitterAsyncSession(
                 headers=self._config.ig_headers,
                 impersonate=self._config.ig_impersonate,
                 proxies=proxies,
                 timeout=self._config.request_timeout,
                 max_clients=self._config.async_max_clients,
+                delay_simulator=self._delay_simulator,
             )
             # Evict oldest session if pool exceeds limit
             MAX_POOL_SIZE = 50
@@ -161,20 +244,28 @@ class InstagramClient:
             logger.debug("Session invalidated: %s", _mask_proxy(proxy_url))
 
     async def _get_auth_session(self) -> AsyncSession:
-        """Return the single authenticated AsyncSession, creating it if needed.
+        """Return an authenticated AsyncSession. If multi-account pool is configured
+        and has healthy members, it rotates through the pool. Otherwise, falls back
+        to the single configured _cookie_manager.
 
-        Raises FetchError if no valid cookies are loaded — callers can convert
-        this to a user-facing 'auth required' message.
+        Raises FetchError/AuthError if no valid cookies are loaded.
         """
         if self._closed:
             raise FetchError("Client is closed")
-        cm = self._cookie_manager
+
+        pool_res = await self._account_pool.get_next_account()
+        if pool_res is not None:
+            alias, cm = pool_res
+        else:
+            alias = "default"
+            cm = self._cookie_manager
+
         if not (cm and cm.is_authenticated):
-            raise AuthError()
+            raise AuthError("No authenticated session available.")
+
         async with self._auth_session_lock:
-            if self._auth_session is None:
-                cm = self._cookie_manager
-                session = AsyncSession(
+            if alias not in self._auth_sessions:
+                session = JitterAsyncSession(
                     headers={
                         "User-Agent": self._config.ig_user_agent,
                         "Accept": "*/*",
@@ -186,18 +277,20 @@ class InstagramClient:
                     impersonate=self._config.ig_impersonate,
                     timeout=self._config.request_timeout,
                     max_clients=self._config.async_max_clients,
+                    delay_simulator=self._delay_simulator,
+                    account_pool=self._account_pool,
+                    cookies_path=cm.cookies_path if cm else "",
                 )
-                # Set each cookie with domain=".instagram.com" so libcurl sends them
-                # to ALL subdomains (www.instagram.com, i.instagram.com, etc.).
-                # Decode octal escapes in values (e.g. rur's \054 → comma) so that
-                # Instagram's routing layer receives the correct cookie values.
-                if cm and cm.cookies:
+                if cm.cookies:
                     for name, value in cm.cookies.items():
                         session.cookies.set(
                             name, self._decode_cookie_value(value), domain=".instagram.com"
                         )
-                self._auth_session = session
-            return self._auth_session
+                session.account_alias = alias
+                self._auth_sessions[alias] = session
+
+            self._cookie_manager = cm
+            return self._auth_sessions[alias]
 
     @staticmethod
     def _decode_cookie_value(value: str) -> str:
@@ -240,6 +333,13 @@ class InstagramClient:
             except Exception:
                 pass
         async with self._auth_session_lock:
+            for s in list(self._auth_sessions.values()):
+                try:
+                    await s.close()
+                except Exception:
+                    pass
+            self._auth_sessions.clear()
+
             if self._auth_session is not None:
                 try:
                     await self._auth_session.close()
@@ -348,8 +448,11 @@ class InstagramClient:
         """Single attempt: fetch web_profile_info."""
         url = self._config.ig_endpoint.format(username)
         session = await self._get_session(proxy_url)
-        resp = await session.get(url)
+        resp = await session.get(url, allow_redirects=False)
         status = resp.status_code
+
+        if status in (301, 302):
+            raise FetchError(f"fetch_user(@{username}) redirected to login (session expired)")
 
         if status == 404:
             # Definitive "not found" — no retry needed; treat as success-with-None
@@ -414,21 +517,28 @@ class InstagramClient:
     ) -> Dict[str, Any]:
         """Single attempt: fetch one v1/feed/user page."""
         session = await self._get_session(proxy_url)
-        resp = await session.get(url)
+        resp = await session.get(url, allow_redirects=False)
         status = resp.status_code
 
         if status == 200:
             try:
                 d = resp.json()
+                items = d.get("items", [])
+                if not items and not d.get("more_available"):
+                    # HTTP 200 but empty items — Instagram is rate-limiting or
+                    # the session was detected; treat as a soft failure so caller
+                    # can break and the empty result is NOT cached.
+                    logger.warning("feed_v1 HTTP 200 but items=[] for url=%s — likely rate-limited", url)
                 return {
                     "ok": True,
-                    "items": d.get("items", []),
+                    "items": items,
                     "more_available": d.get("more_available", False),
                     "next_max_id": d.get("next_max_id", ""),
                     "status_code": 200,
+                    "rate_limited": not items,
                 }
             except (ValueError, TypeError):
-                return {"ok": False, "items": [], "more_available": False, "next_max_id": "", "status_code": 200}
+                return {"ok": False, "items": [], "more_available": False, "next_max_id": "", "status_code": 200, "rate_limited": True}
 
         if status == 429:
             return {"ok": False, "items": [], "more_available": False, "next_max_id": "", "status_code": 429}
@@ -488,7 +598,11 @@ class InstagramClient:
 
                 if not page_result.get("ok"):
                     break
-                await self._cache.set(cache_key, page_result, ttl)
+                # Don't cache rate-limited (HTTP 200 but empty) responses
+                if not page_result.get("rate_limited"):
+                    await self._cache.set(cache_key, page_result, ttl)
+                else:
+                    logger.warning("feed_v1 skipping cache for empty rate-limited response uid=%s", user_id)
 
             first_page = False
             page_num += 1
@@ -551,9 +665,12 @@ class InstagramClient:
                 "server_timestamps": "true",
             },
             headers={"Referer": f"https://www.instagram.com/{username}/"},
+            allow_redirects=False,
         )
 
         status = resp.status_code
+        if status in (301, 302):
+            raise FetchError(f"fetch_graphql_attempt(@{username}) redirected to login (session expired)")
         if status == 429:
             return {"ok": False, "edges": [], "end_cursor": "", "has_next_page": False, "status_code": 429}
         if status != 200:
@@ -812,9 +929,14 @@ class InstagramClient:
                     "X-FB-LSD": lsd,
                     "X-CSRFToken": self._cookie_manager.cookies.get("csrftoken", ""),  # type: ignore[union-attr]
                 },
+                allow_redirects=False,
             )
 
             status = resp.status_code
+            if status in (301, 302, 303, 307, 308):
+                raise FetchError(
+                    f"Tagged Tab: redirected (HTTP {status}) — session may be expired or rate-limited"
+                )
             if status == 401 or status == 403:
                 raise FetchError(
                     f"Tagged Tab: HTTP {status} — session may be expired. "
@@ -967,9 +1089,14 @@ class InstagramClient:
                     "X-FB-LSD": lsd,
                     "X-CSRFToken": self._cookie_manager.cookies.get("csrftoken", ""),  # type: ignore[union-attr]
                 },
+                allow_redirects=False,
             )
 
             status = resp.status_code
+            if status in (301, 302, 303, 307, 308):
+                raise FetchError(
+                    f"Reposts Tab: redirected (HTTP {status}) — session may be expired or rate-limited"
+                )
             if status in (401, 403):
                 raise FetchError(
                     f"Reposts Tab: HTTP {status} — session may be expired. "
@@ -1133,9 +1260,14 @@ class InstagramClient:
                     "X-FB-LSD": lsd,
                     "X-CSRFToken": self._cookie_manager.cookies.get("csrftoken", ""),  # type: ignore[union-attr]
                 },
+                allow_redirects=False,
             )
 
             status = resp.status_code
+            if status in (301, 302, 303, 307, 308):
+                raise FetchError(
+                    f"Reels Tab: redirected (HTTP {status}) — session may be expired or rate-limited"
+                )
             if status in (401, 403):
                 raise FetchError(
                     f"Reels Tab: HTTP {status} — session may be expired. "
@@ -1272,6 +1404,7 @@ class InstagramClient:
                             "X-CSRFToken": csrf,
                             "Accept": "application/json",
                         },
+                        allow_redirects=False,
                     )
                 except Exception as exc:
                     if attempt == 2:
@@ -1279,6 +1412,8 @@ class InstagramClient:
                     await asyncio.sleep(1)
                     continue
 
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    raise FetchError(f"media_info({shortcode}): redirected (HTTP {resp.status_code}) — session may be expired")
                 if resp.status_code == 404:
                     raise FetchError(f"Post /{shortcode}/ not found — deleted, private, or invalid shortcode.")
                 if resp.status_code == 400:
@@ -1636,12 +1771,43 @@ class InstagramClient:
         edges = media_info.get("edges") or []
         page_info = media_info.get("page_info") or {}
 
+        # Normalize edges: unwrap 'node' and map fields to a flat standard structure
+        # so downstream tools (hashtag_suggest, niche_top, format_hashtag_markdown)
+        # can access post.get('username'), post.get('shortcode'), etc. directly.
+        def _normalize_edge(edge: Dict) -> Dict:
+            node = edge.get("node") or edge  # fallback: edge itself if already flat
+            owner = node.get("owner") or {}
+            caption_obj = node.get("edge_media_to_caption") or {}
+            caption_edges = caption_obj.get("edges") or []
+            caption_text = ""
+            if caption_edges:
+                cap_node = caption_edges[0].get("node") or {}
+                caption_text = cap_node.get("text") or ""
+            return {
+                "shortcode":      node.get("shortcode") or "",
+                "username":       owner.get("username") or "",
+                "user_id":        str(owner.get("id") or ""),
+                "is_verified":    bool(owner.get("is_verified")),
+                "like_count":     int(node.get("edge_liked_by", {}).get("count") or 0),
+                "comment_count":  int(node.get("edge_media_to_comment", {}).get("count") or 0),
+                "play_count":     int(node.get("video_view_count") or 0),
+                "taken_at":       int(node.get("taken_at_timestamp") or 0),
+                "caption":        caption_text,
+                "is_video":       bool(node.get("is_video")),
+                "thumbnail_url":  node.get("thumbnail_src") or node.get("display_url") or "",
+                "post_url":       f"https://www.instagram.com/p/{node.get('shortcode', '')}/",
+                # keep original node for reference
+                "_node":          node,
+            }
+
+        posts = [_normalize_edge(e) for e in edges]
+
         return {
             "ok": True,
             "found": True,
             "status_code": 200,
             "tag": tag,
-            "posts": edges,
+            "posts": posts,
             "has_more": bool(page_info.get("has_next_page")),
             "end_cursor": page_info.get("end_cursor", ""),
             "related_searches": related_kw,
@@ -2092,6 +2258,7 @@ class InstagramClient:
                         params=params,
                         headers=headers,
                         timeout=15,
+                        allow_redirects=False,
                     )
                 except Exception as exc:
                     if attempt == 2:
@@ -2099,6 +2266,8 @@ class InstagramClient:
                     await asyncio.sleep(1)
                     continue
 
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    raise FetchError(f"search: redirected (HTTP {resp.status_code}) — session may be expired")
                 if resp.status_code == 401:
                     return None
                 if resp.status_code != 200:
@@ -2209,11 +2378,16 @@ class InstagramClient:
         for host in hosts:
             url = f"{host}/api/v1/friendships/{user_pk}/{endpoint}/"
             try:
-                resp = await session.get(url, params=params, headers=headers, timeout=20)
+                resp = await session.get(
+                    url, params=params, headers=headers, timeout=20, allow_redirects=False
+                )
             except Exception as exc:
                 last_error = str(exc)
                 continue
 
+            if resp.status_code in (301, 302, 303, 307, 308):
+                last_error = f"Redirected (HTTP {resp.status_code}) — session may be expired or rate-limited"
+                continue
             if resp.status_code == 404:
                 raise FetchError(f"user {user_pk} not found")
             if resp.status_code == 200:
@@ -2358,13 +2532,15 @@ class InstagramClient:
 
             for attempt in range(3):
                 try:
-                    resp = await session.get(url, headers=headers, timeout=15)
+                    resp = await session.get(url, headers=headers, timeout=15, allow_redirects=False)
                 except Exception as exc:
                     if attempt == 2:
                         raise FetchError(f"likers request failed: {exc}") from exc
                     await asyncio.sleep(1)
                     continue
 
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    raise FetchError(f"likers: redirected (HTTP {resp.status_code}) — session may be expired")
                 if resp.status_code == 401:
                     raise FetchError("auth required for likers endpoint")
                 if resp.status_code == 404:
@@ -2539,13 +2715,15 @@ class InstagramClient:
 
             for attempt in range(3):
                 try:
-                    resp = await session.get(url, headers=headers, timeout=15)
+                    resp = await session.get(url, headers=headers, timeout=15, allow_redirects=False)
                 except Exception as exc:
                     if attempt == 2:
                         raise FetchError(f"stories request failed: {exc}") from exc
                     await asyncio.sleep(1)
                     continue
 
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    raise FetchError(f"stories: redirected (HTTP {resp.status_code}) — session may be expired")
                 if resp.status_code == 401:
                     raise FetchError("auth required for stories endpoint")
                 if resp.status_code != 200:
@@ -2707,10 +2885,13 @@ class InstagramClient:
                             "x-csrftoken":     csrf,
                         },
                         timeout=15,
+                        allow_redirects=False,
                     )
                 except Exception as exc:
                     raise FetchError(f"location_search request failed: {exc}") from exc
 
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    raise FetchError(f"location_search: redirected (HTTP {resp.status_code}) — session may be expired")
                 if resp.status_code != 200:
                     raise FetchError(f"location_search HTTP {resp.status_code}")
 
@@ -2755,10 +2936,13 @@ class InstagramClient:
                             "Content-Type":    "application/x-www-form-urlencoded",
                         },
                         timeout=15,
+                        allow_redirects=False,
                     )
                 except Exception as exc:
                     raise FetchError(f"location sections request failed: {exc}") from exc
 
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    raise FetchError(f"location sections: redirected (HTTP {resp.status_code}) — session may be expired")
                 if resp.status_code == 429:
                     raise FetchError(f"location_posts({loc_id}) rate limited (429)")
                 if resp.status_code == 401:
@@ -2860,10 +3044,13 @@ class InstagramClient:
                             "Content-Type":    "application/x-www-form-urlencoded",
                         },
                         timeout=15,
+                        allow_redirects=False,
                     )
                 except Exception as exc:
                     raise FetchError(f"audio_reels request failed: {exc}") from exc
 
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    raise FetchError(f"audio_reels: redirected (HTTP {resp.status_code}) — session may be expired")
                 if resp.status_code == 429:
                     raise FetchError(f"audio_reels({audio_cluster_id}) rate limited (429)")
                 if resp.status_code == 401:
@@ -3593,7 +3780,7 @@ class InstagramClient:
 
             for attempt in range(3):
                 try:
-                    resp = await session.get(tray_url, headers=headers, timeout=15)
+                    resp = await session.get(tray_url, headers=headers, timeout=15, allow_redirects=False)
                 except Exception as exc:
                     if attempt == 2:
                         raise FetchError(f"highlights request failed: {exc}") from exc
@@ -3601,6 +3788,8 @@ class InstagramClient:
                     await _asyncio.sleep(1)
                     continue
 
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    raise FetchError(f"highlights: redirected (HTTP {resp.status_code}) — session may be expired")
                 if resp.status_code == 401:
                     raise FetchError("auth required for highlights endpoint")
                 if resp.status_code == 404:
@@ -3626,8 +3815,12 @@ class InstagramClient:
                             f"?reel_ids={reel_ids}"
                         )
                         try:
-                            media_resp = await session.get(media_url, headers=headers, timeout=20)
-                            if media_resp.status_code == 200:
+                            media_resp = await session.get(
+                                media_url, headers=headers, timeout=20, allow_redirects=False
+                            )
+                            if media_resp.status_code in (301, 302, 303, 307, 308):
+                                logger.warning("highlights media chunk redirected (HTTP %d)", media_resp.status_code)
+                            elif media_resp.status_code == 200:
                                 for reel in (media_resp.json().get("reels_media") or []):
                                     reel_id = reel.get("id", "")
                                     items = [self._parse_story_item(i) for i in (reel.get("items") or [])]

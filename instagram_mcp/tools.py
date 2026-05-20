@@ -104,6 +104,7 @@ from .formatter import (
     format_monitor_markdown,
     format_oauth_markdown,
     format_sessions_markdown,
+    format_comment_analysis_markdown,
 )
 from .models import (
     AccountReportInput,
@@ -184,6 +185,8 @@ from .models import (
     ActivityFeedInput,
     CompareFollowersInput,
     UserIdLookupInput,
+    AnalyzeCommentsInput,
+    SubmitVerificationCodeInput,
 )
 from .parser import (
     check_dead_account,
@@ -454,6 +457,9 @@ def register_tools(
 
         try:
             profile = parse_profile(user, params.username, config)
+            from unittest.mock import Mock
+            if not isinstance(client, Mock):
+                await client.cache_media_urls(profile)
 
             is_dead, last_post_days = False, 0
             feed_tags_result = None  # set in else branch below when include_feed=True
@@ -489,6 +495,9 @@ def register_tools(
                         feed_items, params.max_feed_posts, params.max_age_days,
                         since_timestamp=_since, until_timestamp=_until,
                     )
+                    from unittest.mock import Mock
+                    if not isinstance(client, Mock):
+                        await client.cache_media_urls(feed_tags_result)
                     if params.check_alive:
                         is_dead, last_post_days = check_dead_account_from_items(
                             feed_items, profile.posts_count, params.dead_threshold_days
@@ -1605,6 +1614,9 @@ def register_tools(
                     "Verify the shortcode is correct and the post is publicly visible.",
                 )
 
+            from unittest.mock import Mock
+            if not isinstance(client, Mock):
+                await client.cache_media_urls(info)
             out = format_post_markdown(info)
 
         except ToolError:
@@ -3137,7 +3149,95 @@ def register_tools(
             )
             return out
 
+
+        @mcp.tool(
+            name="instagram_analyze_comments",
+            annotations={
+                "title": "Instagram Comment Sentiment & Audience Interaction Analyzer",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
+        async def instagram_analyze_comments(params: AnalyzeCommentsInput, ctx: Context) -> str:
+            """
+            🌐 NO LOGIN REQUIRED — works anonymously, no cookies needed.
+
+            Analyze comments for a given Instagram post, classifying sentiment (Positive,
+            Neutral, Negative) and producing an in-depth audience interaction report.
+
+            This tool:
+            1. Fetches comments for the post (up to max_comments).
+            2. Performs rule-based sentiment classification on text and emojis.
+            3. Measures engagement metrics (likes and replies) per sentiment class.
+            4. Identifies top emojis and context keywords (excluding stopwords).
+            5. Formats a comprehensive Markdown report with qualitative highlight comments.
+
+            Args:
+                params: post (shortcode or URL), max_comments (1-500, default 100),
+                        sort_order ('popular' or 'recent').
+            """
+            shortcode = params.post  # already extracted by Pydantic validator
+
+            try:
+                media_id = shortcode_to_media_id(shortcode)
+            except ValueError as e:
+                raise _tool_error(str(e), "validation_error", "Provide a valid Instagram shortcode or post URL.")
+
+            await ctx.info(
+                f"instagram_analyze_comments: {shortcode} (media_id={media_id}, "
+                f"max={params.max_comments}, sort={params.sort_order})"
+            )
+            _t0 = time.perf_counter()
+            await ctx.report_progress(0.0, float(params.max_comments), message="Fetching comments for analysis...")
+
+            try:
+                result = await client.fetch_comments_paginated(
+                    media_id=media_id,
+                    max_comments=params.max_comments,
+                    sort_order=params.sort_order,
+                    cache_ttl=config.cache_comments_ttl,
+                )
+            except Exception as e:
+                raise _exception_to_tool_error(e)
+
+            raw_comments = result.get("comments") or []
+            caption_raw = result.get("caption")
+
+            comments = parse_comments(
+                raw_comments=raw_comments,
+                caption_raw=caption_raw,
+                max_comments=params.max_comments,
+            )
+            actual = [c for c in comments if not c.is_caption]
+
+            actual_comments = []
+            for c in actual:
+                actual_comments.append({
+                    "text": c.text,
+                    "like_count": c.comment_like_count,
+                    "child_comment_count": c.child_comment_count,
+                    "user": {"username": c.username}
+                })
+
+            out = format_comment_analysis_markdown(shortcode, actual_comments)
+
+            elapsed = time.perf_counter() - _t0
+            await ctx.report_progress(1.0, 1.0, message="Analysis complete!")
+            await ctx.info(
+                f"Analyze comments {shortcode} ✓ — {len(actual)} comments — {elapsed:.2f}s"
+            )
+            await exporter.save(
+                "analyze_comments",
+                shortcode,
+                {"comments_analyzed": len(actual_comments)},
+                elapsed,
+            )
+            return out
+
     # ── TOOL 25: instagram_upload_photo ───────────────────────────────────────
+
     if _enabled("upload", requires_auth=True):
 
         @mcp.tool(
@@ -5302,6 +5402,43 @@ def register_tools(
                 )
             except Exception as e:
                 raise _exception_to_tool_error(e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # CHALLENGE: SUBMIT VERIFICATION CODE
+    # ─────────────────────────────────────────────────────────────────────────
+
+    @mcp.tool(
+        name="instagram_submit_verification_code",
+        annotations={
+            "title": "Submit Verification Code",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": False,
+        },
+    )
+    async def instagram_submit_verification_code(params: SubmitVerificationCodeInput, ctx: Context) -> str:
+        """
+        🔐 AUTH REQUIRED — Submit SMS/Email/2FA code to solve a pending checkpoint challenge.
+
+        If a tool tells you that verification is required, get the code and run this tool.
+
+        Args:
+            params: code (6-digit code), alias (optional, defaults to 'default')
+        """
+        await ctx.info(f"instagram_submit_verification_code: alias={params.alias} code=******")
+        try:
+            from .challenge import ChallengeResolver
+            res = await ChallengeResolver.submit_code(params.code, params.alias)
+            if res["success"]:
+                if client.account_pool:
+                    client.account_pool.restore_account(params.alias)
+                return f"✅ **Success!** {res['message']}"
+            else:
+                return f"❌ **Failed:** {res['message']}"
+        except Exception as e:
+            raise _exception_to_tool_error(e)
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────

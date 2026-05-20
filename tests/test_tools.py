@@ -340,13 +340,15 @@ async def test_instagram_hashtag_basic(tools, mock_client, mock_ctx):
         "tag": "football",
         "posts": [
             {
-                "node": {
-                    "__typename": "XIGPolarisVideoMedia",
-                    "code": "DXUoQBqiCrY",
-                    "play_count": 20820894,
-                    "user": {"username": "inovinate", "is_verified": True},
-                    "caption": {"text": "Amazing football highlights #football"},
-                }
+                "shortcode": "DXUoQBqiCrY",
+                "username": "inovinate",
+                "is_verified": True,
+                "play_count": 20820894,
+                "caption": "Amazing football highlights #football",
+                "is_video": True,
+                "taken_at": 0,
+                "like_count": 0,
+                "comment_count": 0,
             }
         ],
         "has_more": True,

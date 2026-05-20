@@ -147,6 +147,8 @@ class MCPConfig:
 
     # ── Authentication (cookies.txt) ─────────────────────────────────────────
     cookies_path: str = ""            # Override via INSTAGRAM_MCP_COOKIES env var
+    accounts_dir: str = ""            # Path to directory containing multiple accounts (e.g. data/accounts/)
+    media_cache_dir: str = ""         # Path to directory containing cached media files (e.g. data/media_cache/)
 
     # ── Toolsets (tool registration gating) ──────────────────────────────────
     # Controls which groups of MCP tools are registered at startup.
@@ -158,6 +160,8 @@ class MCPConfig:
     # instagram_reels, instagram_stories, instagram_highlights, instagram_followers_list,
     # instagram_following_list, instagram_post_likers) when no cookies are loaded.
     hide_auth_when_no_cookies: bool = False
+    delay_min_ms: int = 500
+    delay_max_ms: int = 2000
 
     # ── Bio Link Filtering ───────────────────────────────────────────────────
     social_domains: Set[str] = field(default_factory=lambda: {
@@ -266,6 +270,10 @@ class MCPConfig:
         # Authentication
         if v := os.environ.get("INSTAGRAM_MCP_COOKIES"):
             cfg.cookies_path = v
+        if v := os.environ.get("INSTAGRAM_MCP_ACCOUNTS_DIR"):
+            cfg.accounts_dir = v
+        if v := os.environ.get("INSTAGRAM_MCP_MEDIA_CACHE_DIR"):
+            cfg.media_cache_dir = v
 
         # JSON auto-export
         if os.environ.get("INSTAGRAM_MCP_EXPORT_ENABLED", "").lower() in ("0", "false"):
@@ -281,6 +289,11 @@ class MCPConfig:
             cfg.enabled_toolsets = parts or {"all"}
         if os.environ.get("INSTAGRAM_MCP_HIDE_AUTH_WHEN_NO_COOKIES", "").lower() in ("1", "true"):
             cfg.hide_auth_when_no_cookies = True
+
+        if v := os.environ.get("INSTAGRAM_MCP_DELAY_MIN"):
+            cfg.delay_min_ms = int(v)
+        if v := os.environ.get("INSTAGRAM_MCP_DELAY_MAX"):
+            cfg.delay_max_ms = int(v)
 
         return cfg
 

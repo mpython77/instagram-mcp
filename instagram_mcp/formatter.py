@@ -1564,8 +1564,9 @@ def format_hashtag_markdown(
         lines += ["*No posts found for this hashtag.*"]
         return "\n".join(lines)
 
-    # Auth mode: flat dicts with like_count; anon mode: nested node dicts
-    is_auth_format = auth_used or ("shortcode" in (posts[0] if posts else {}))
+    # Auth mode posts are flat dicts with many fields; anon posts are now also
+    # normalized flat dicts (after client-side unwrap), but distinguished by auth_used.
+    is_auth_format = auth_used
 
     lines += ["## Posts", ""]
     if is_auth_format:
@@ -1603,16 +1604,14 @@ def format_hashtag_markdown(
                 f"{music_cell} | {tag_cell} | {date} | [{code}](https://www.instagram.com/p/{code}/) | {caption} |"
             )
         else:
-            node = post.get("node", {}) if "node" in post else post
-            user = node.get("user") or {}
-            username   = user.get("username", "")
-            verified   = "✓" if user.get("is_verified") else ""
-            code       = node.get("code", "")
-            play_count = node.get("play_count") or node.get("view_count")
+            # Normalized anon post: flat fields from _normalize_edge()
+            username   = post.get("username") or ""
+            verified   = "✓" if post.get("is_verified") else ""
+            code       = post.get("shortcode") or ""
+            play_count = post.get("play_count") or 0
             views      = _fmt(int(play_count)) if play_count else "—"
-            typename   = node.get("__typename", "")
-            mtype      = "🎬" if "Video" in typename else "🖼"
-            raw_ts     = int(node.get("taken_at_timestamp") or node.get("taken_at") or 0)
+            mtype      = "🎬" if post.get("is_video") else "🖼"
+            raw_ts     = int(post.get("taken_at") or 0)
             if raw_ts:
                 from datetime import datetime as _dt_h, timezone as _tz_h
                 try:
@@ -1621,8 +1620,7 @@ def format_hashtag_markdown(
                     date = "—"
             else:
                 date = "—"
-            cap_obj    = node.get("caption") or {}
-            cap_raw    = (cap_obj.get("text") or "") if isinstance(cap_obj, dict) else ""
+            cap_raw    = post.get("caption") or ""
             caption    = cap_raw[:55].replace("|", "\\|").replace("\n", " ")
             if len(cap_raw) > 55: caption += "…"
             lines.append(
@@ -2898,3 +2896,341 @@ def format_sessions_markdown(data: dict) -> str:
         "\n_To add a session: set env var `INSTAGRAM_MCP_COOKIES_<ALIAS>=/path/to/cookies.txt` and restart._"
     )
     return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sentiment Analysis Formatter
+# ─────────────────────────────────────────────────────────────────────────────
+
+def analyze_comments_sentiment(comments: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Perform rule-based sentiment scoring on comments with negation window and multilingual support."""
+    import collections as _collections
+    import re as _re
+
+    # Lexicon
+    pos_words = {
+        # English
+        "love", "cool", "great", "nice", "awesome", "perfect", "beautiful", "fire", "best", "like", 
+        "amazing", "wonderful", "cute", "pretty", "sweet", "wow", "slay", "dope", "epic", "legendary", 
+        "goat", "king", "queen", "thank", "thanks", "obsessed", "stunner", "stunning", "gorgeous", 
+        "genius", "smart", "helpful", "correct", "true", "yes", "agree", "perfectly",
+        # Uzbek
+        "zo'r", "ajoyib", "chiroyli", "rahmat", "super", "yaxshi", "go'zal", "baraka", 
+        "yashang", "ofarin", "tasanno", "sher", "asal", "shirin", "halol",
+        # Russian
+        "класс", "круто", "отлично", "красиво", "спасибо", "лучший", "шикарно", "молодец", "супер",
+        "умница", "красавчик", "огонь", "топ", "хорошо", "согласен", "да"
+    }
+    pos_emojis = {
+        "❤️", "😍", "🔥", "🙌", "👏", "🥰", "🤩", "💖", "✨", "🎉", "💯", "👍", "💕", "🌟", "🎈"
+    }
+    neg_words = {
+        # English
+        "hate", "bad", "worst", "slow", "disappointing", "sad", "fail", "fake", "scam", "wrong", 
+        "cringe", "annoying", "terrible", "horrible", "garbage", "trash", "waste", "useless", 
+        "boring", "worse", "dumb", "stupid", "ugly", "poor", "cheap", "disgusting", "ruined", 
+        "ruin", "scammer", "fraud", "liar", "lies", "no", "nope", "disagree", "ridiculous", 
+        "nonsense", "idiot",
+        # Uzbek
+        "yomon", "xunuk", "aldov", "brak", "past", "qimmat", "aldashdi", "sharmanda", "yo'qol", 
+        "axlat", "tuhmat", "yolg'on", "yaramas", "iflos",
+        # Russian
+        "плохо", "ужас", "говно", "обман", "отстой", "лохотрон", "ужасно", "плохой", "дерьмо",
+        "фу", "ложь", "обманщик", "дурак", "тупой", "дешево", "дорого", "нет"
+    }
+    neg_emojis = {
+        "😢", "😡", "😠", "👎", "🤮", "💩", "🤡", "😭", "😒", "❌", "💔", "🤨", "🤦", "🙄", "👿"
+    }
+    
+    stopwords = {
+        # English
+        "the", "a", "an", "and", "or", "but", "is", "are", "was", "were", "to", "for", "in", "on", 
+        "at", "by", "with", "of", "this", "that", "these", "those", "it", "its", "they", "them", 
+        "their", "you", "your", "me", "my", "we", "our", "he", "him", "his", "she", "her", "i", 
+        "am", "do", "does", "did", "have", "has", "had", "go", "get", "so", "up", "down", "out", 
+        "about", "all", "any", "no", "not", "just", "like", "how", "what", "who", "why",
+        # Uzbek
+        "va", "ammo", "lekin", "balki", "uchun", "bilan", "kabi", "esa", "ham", "u", "bu", "shu",
+        "o'sha", "men", "sen", "biz", "siz", "ular", "o'z", "barcha", "har", "edi",
+        # Russian
+        "и", "в", "во", "что", "он", "на", "я", "с", "со", "как", "а", "то", "все", "она",
+        "так", "его", "но", "ты", "к", "у", "же", "вы", "за", "бы", "по", "только", "ее",
+        "мне", "было", "вот", "от", "меня", "еще", "о", "из", "ему", "им"
+    }
+
+    negation_terms = {
+        "not", "no", "never", "none", "neither", "nor", "cannot", "cant", "dont", "doesnt", "didnt", 
+        "isnt", "arent", "wasnt", "werent", "havent", "hasnt", "hadnt",
+        "emas", "yo'q", "yok", "hech",
+        "не", "нет", "ни", "без", "нельзя"
+    }
+
+    results = []
+    
+    # Trackers
+    pos_count = 0
+    neg_count = 0
+    neu_count = 0
+    
+    pos_likes = 0
+    neg_likes = 0
+    neu_likes = 0
+    
+    pos_replies = 0
+    neg_replies = 0
+    neu_replies = 0
+    
+    emoji_counts = _collections.Counter()
+    keyword_counts = _collections.Counter()
+    pos_keywords = _collections.Counter()
+    neg_keywords = _collections.Counter()
+    
+    # Emojis regex
+    emoji_pattern = _re.compile(
+        r"[\U00010000-\U0010ffff\u2600-\u27bf]"
+    )
+    
+    for c in comments:
+        text = c.get("text", "")
+        likes = int(c.get("like_count") or 0)
+        replies = int(c.get("child_comment_count") or 0)
+        
+        # Extract emojis
+        emojis = emoji_pattern.findall(text)
+        for emoji in emojis:
+            emoji_counts[emoji] += 1
+            
+        # Clean text for word search (support Unicode word chars for Uzbek / Cyrillic)
+        words_only = _re.findall(r"\b\w{2,20}\b", text.lower())
+        
+        # Word counts for keyword cloud
+        for w in words_only:
+            if w not in stopwords:
+                keyword_counts[w] += 1
+                
+        # Sentiment logic with negation window of 2 words
+        p_matches = 0
+        n_matches = 0
+        
+        for emoji in emojis:
+            if emoji in pos_emojis:
+                p_matches += 1
+            if emoji in neg_emojis:
+                n_matches += 1
+                
+        for idx, w in enumerate(words_only):
+            is_negated = False
+            for prev_idx in range(max(0, idx - 2), idx):
+                if words_only[prev_idx] in negation_terms:
+                    is_negated = True
+                    break
+            # Uzbek/Turkic negation check (where negation follows the word, e.g. "yomon emas")
+            if not is_negated and idx + 1 < len(words_only):
+                if words_only[idx + 1] in negation_terms:
+                    is_negated = True
+                    
+            if w in pos_words:
+                if is_negated:
+                    n_matches += 1
+                else:
+                    p_matches += 1
+            elif w in neg_words:
+                if is_negated:
+                    p_matches += 1
+                else:
+                    n_matches += 1
+        
+        if p_matches > n_matches:
+            sentiment = "Positive"
+            pos_count += 1
+            pos_likes += likes
+            pos_replies += replies
+            for w in words_only:
+                if w not in stopwords and w not in pos_words:
+                    pos_keywords[w] += 1
+        elif n_matches > p_matches:
+            sentiment = "Negative"
+            neg_count += 1
+            neg_likes += likes
+            neg_replies += replies
+            for w in words_only:
+                if w not in stopwords and w not in neg_words:
+                    neg_keywords[w] += 1
+        else:
+            sentiment = "Neutral"
+            neu_count += 1
+            neu_likes += likes
+            neu_replies += replies
+            
+        results.append({
+            "text": text,
+            "username": c.get("user", {}).get("username", "anonymous"),
+            "likes": likes,
+            "replies": replies,
+            "sentiment": sentiment
+        })
+        
+    total = len(comments)
+    if total > 0:
+        pos_pct = (pos_count / total) * 100
+        neg_pct = (neg_count / total) * 100
+        neu_pct = (neu_count / total) * 100
+        score = pos_pct - neg_pct
+    else:
+        pos_pct = neg_pct = neu_pct = score = 0.0
+        
+    return {
+        "total": total,
+        "pos_count": pos_count,
+        "neg_count": neg_count,
+        "neu_count": neu_count,
+        "pos_pct": pos_pct,
+        "neg_pct": neg_pct,
+        "neu_pct": neu_pct,
+        "score": score,
+        "pos_likes_avg": pos_likes / max(1, pos_count),
+        "neg_likes_avg": neg_likes / max(1, neg_count),
+        "neu_likes_avg": neu_likes / max(1, neu_count),
+        "pos_replies_avg": pos_replies / max(1, pos_count),
+        "neg_replies_avg": neg_replies / max(1, neg_count),
+        "neu_replies_avg": neu_replies / max(1, neu_count),
+        "top_emojis": emoji_counts.most_common(10),
+        "top_keywords": keyword_counts.most_common(10),
+        "top_pos_keywords": pos_keywords.most_common(10),
+        "top_neg_keywords": neg_keywords.most_common(10),
+        "processed_comments": sorted(results, key=lambda x: x["likes"], reverse=True)
+    }
+
+
+def format_comment_analysis_markdown(shortcode: str, comments: List[Dict[str, Any]]) -> str:
+    """Generate a premium-looking Markdown report on comment sentiment & engagement."""
+    if not comments:
+        return (
+            f"# Comment Analysis Report — /{shortcode}/\n\n"
+            "⚠️ **No comments found or provided for analysis.**"
+        )
+        
+    analysis = analyze_comments_sentiment(comments)
+    total = analysis["total"]
+    score = analysis["score"]
+    
+    # Sentiment Verdict
+    if score > 40:
+        verdict = "Very Positive 🟢"
+        verdict_desc = "The audience reaction is highly enthusiastic and supportive."
+    elif score > 15:
+        verdict = "Positive 🟢"
+        verdict_desc = "Overall reaction is favorable with constructive feedback."
+    elif score > -15:
+        verdict = "Neutral ⚪"
+        verdict_desc = "Balanced reaction, or comments are primarily factual/tagging friends."
+    elif score > -40:
+        verdict = "Negative 🔴"
+        verdict_desc = "The audience is expressing notable dissatisfaction or skepticism."
+    else:
+        verdict = "Very Negative 🔴"
+        verdict_desc = "Critically negative sentiment. Significant backlash or brand risk detected."
+
+    # Score Gauge: represent -100 to +100 with a slider using target mark
+    gauge_pct = int((score + 100) / 2) # 0 to 100
+    gauge_bar = ""
+    for i in range(20):
+        if i == min(19, gauge_pct // 5):
+            gauge_bar += "🎯"
+        else:
+            gauge_bar += "▬"
+            
+    lines = [
+        f"# Comment Analysis Report — /{shortcode}/",
+        "",
+        "## 📊 Sentiment Executive Summary",
+        "",
+        "| Metric | Value | Details / Interpretation |",
+        "| :--- | :--- | :--- |",
+        f"| **Sentiment Score** | `{score:+.1f}` | scale: -100 (critical) to +100 (perfect) |",
+        f"| **Overall Verdict** | **{verdict}** | {verdict_desc} |",
+        f"| **Total Comments** | `{total}` | processed comments |",
+        "",
+        f"**Sentiment Level:** `-100` {gauge_bar} `+100`",
+        "",
+        "---",
+        "",
+        "## 📈 Sentiment Breakdown",
+        "",
+        "| Sentiment | Icon | Count | Share % | Avg Likes | Avg Replies |",
+        "| :--- | :---: | :---: | :---: | :---: | :---: |",
+        f"| **Positive** | 🟢 | `{analysis['pos_count']}` | `{analysis['pos_pct']:.1f}%` | `{analysis['pos_likes_avg']:.1f}` | `{analysis['pos_replies_avg']:.1f}` |",
+        f"| **Neutral** | ⚪ | `{analysis['neu_count']}` | `{analysis['neu_pct']:.1f}%` | `{analysis['neu_likes_avg']:.1f}` | `{analysis['neu_replies_avg']:.1f}` |",
+        f"| **Negative** | 🔴 | `{analysis['neg_count']}` | `{analysis['neg_pct']:.1f}%` | `{analysis['neg_likes_avg']:.1f}` | `{analysis['neg_replies_avg']:.1f}` |",
+        "",
+        "---",
+        "",
+        "## 🔤 Audience Vocabulary & Emojis",
+        ""
+    ]
+    
+    # Top Emojis
+    if analysis["top_emojis"]:
+        lines += [
+            "### Top Emojis Used",
+            "",
+            "| Emoji | Count | Visualization |",
+            "| :---: | :---: | :--- |"
+        ]
+        max_emoji_cnt = max(1, analysis["top_emojis"][0][1])
+        for emoji, cnt in analysis["top_emojis"][:5]:
+            bar_len = int((cnt / max_emoji_cnt) * 10)
+            bar = "🔥" * bar_len if bar_len > 0 else "▪️"
+            lines.append(f"| {emoji} | {cnt} | {bar} |")
+        lines.append("")
+        
+    # Keywords
+    lines += [
+        "### Top Context Keywords",
+        "*(common stopwords and emotion indicators excluded)*",
+        "",
+        "| Rank | Overall Keywords | Positive Context | Negative Context |",
+        "| :---: | :--- | :--- | :--- |"
+    ]
+    
+    top_overall = analysis["top_keywords"]
+    top_pos = analysis["top_pos_keywords"]
+    top_neg = analysis["top_neg_keywords"]
+    
+    for idx in range(5):
+        w_all = f"`{top_overall[idx][0]}` ({top_overall[idx][1]})" if idx < len(top_overall) else "-"
+        w_pos = f"`{top_pos[idx][0]}` ({top_pos[idx][1]})" if idx < len(top_pos) else "-"
+        w_neg = f"`{top_neg[idx][0]}` ({top_neg[idx][1]})" if idx < len(top_neg) else "-"
+        lines.append(f"| {idx+1} | {w_all} | {w_pos} | {w_neg} |")
+        
+    lines += [
+        "",
+        "---",
+        "",
+        "## 💬 Highlight Comments",
+        ""
+    ]
+    
+    # Display top-liked positive/negative comments for qualitative context
+    comments_by_sentiment = {
+        "Positive": [c for c in analysis["processed_comments"] if c["sentiment"] == "Positive"],
+        "Negative": [c for c in analysis["processed_comments"] if c["sentiment"] == "Negative"],
+        "Neutral": [c for c in analysis["processed_comments"] if c["sentiment"] == "Neutral"]
+    }
+    
+    for sent, icon in [("Positive", "🟢"), ("Negative", "🔴")]:
+        s_list = comments_by_sentiment[sent]
+        if s_list:
+            lines += [
+                f"### Top {sent} Comments {icon}",
+                ""
+            ]
+            for c in s_list[:3]:
+                clean_text = c["text"].replace("\n", " ").strip()
+                if len(clean_text) > 150:
+                    clean_text = clean_text[:147] + "..."
+                lines.append(f"- **@{c['username']}**: \"{clean_text}\" *(❤️ {c['likes']} likes, 💬 {c['replies']} replies)*")
+            lines.append("")
+            
+    return "\n".join(lines)
+

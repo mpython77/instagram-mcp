@@ -2099,3 +2099,56 @@ class UserIdLookupInput(BaseModel):
         default="auto",
         description="'username_to_id', 'id_to_username', or 'auto' (detects based on input).",
     )
+
+
+class AnalyzeCommentsInput(BaseModel):
+    """Input for instagram_analyze_comments tool (🌐 anonymous)."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    post: str = Field(
+        ...,
+        description=(
+            "Instagram post shortcode or full URL. Examples:\n"
+            "  'DXjuqH9nDVE'\n"
+            "  'https://www.instagram.com/p/DXjuqH9nDVE/'\n"
+            "  'https://www.instagram.com/reel/DXjuqH9nDVE/'"
+        ),
+        min_length=5,
+    )
+    max_comments: int = Field(
+        default=100,
+        description="Maximum comments to analyze (1-500).",
+        ge=1,
+        le=500,
+    )
+    sort_order: str = Field(
+        default="popular",
+        description="'popular' (most-liked first) or 'recent' (chronological).",
+    )
+
+    @field_validator("post")
+    @classmethod
+    def extract_shortcode(cls, v: str) -> str:
+        v = v.strip()
+        m = re.search(r'/(?:p|reel|tv)/([A-Za-z0-9_\-]+)', v)
+        if m:
+            return m.group(1)
+        if re.match(r'^[A-Za-z0-9_\-]{5,15}$', v):
+            return v
+        raise ValueError(f"Cannot extract a valid shortcode from: {v!r}")
+
+    @field_validator("sort_order")
+    @classmethod
+    def validate_sort(cls, v: str) -> str:
+        v = v.strip().lower()
+        return v if v in ("popular", "recent") else "popular"
+
+
+class SubmitVerificationCodeInput(BaseModel):
+    """Input for instagram_submit_verification_code tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    code: str = Field(..., description="The 6-digit verification code sent via SMS/Email or from a 2FA app.", min_length=6, max_length=8)
+    alias: str = Field(default="default", description="The account alias under verification.")
+
+

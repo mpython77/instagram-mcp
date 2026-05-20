@@ -73,6 +73,11 @@ class CookieManager:
         import asyncio
         self._csrf_lock = asyncio.Lock()
 
+    @property
+    def cookies_path(self) -> str:
+        path = self._resolve_path()
+        return str(path) if path else ""
+
     # ── Initialisation ───────────────────────────────────────────────────────
 
     def load(self) -> bool:

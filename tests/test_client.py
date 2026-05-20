@@ -120,7 +120,7 @@ def test_client_init(client, mock_config, mock_proxy_manager, mock_rate_limiter,
 
 @pytest.mark.asyncio
 async def test_get_session(client):
-    with patch("instagram_mcp.client.AsyncSession") as mock_session_cls:
+    with patch("instagram_mcp.client.JitterAsyncSession") as mock_session_cls:
         mock_session = mock_session_cls.return_value
         session = await client._get_session(None)
         assert session == mock_session
@@ -132,7 +132,7 @@ async def test_get_session(client):
 
 @pytest.mark.asyncio
 async def test_get_session_with_proxy(client):
-    with patch("instagram_mcp.client.AsyncSession") as mock_session_cls:
+    with patch("instagram_mcp.client.JitterAsyncSession") as mock_session_cls:
         proxy = "http://proxy:8080"
         session = await client._get_session(proxy)
         mock_session_cls.assert_called_with(
@@ -141,11 +141,12 @@ async def test_get_session_with_proxy(client):
             proxies={"http": proxy, "https": proxy},
             timeout=client.config.request_timeout,
             max_clients=client.config.async_max_clients,
+            delay_simulator=client._delay_simulator,
         )
 
 @pytest.mark.asyncio
 async def test_get_session_pool_eviction(client):
-    with patch("instagram_mcp.client.AsyncSession") as mock_session_cls:
+    with patch("instagram_mcp.client.JitterAsyncSession") as mock_session_cls:
         # Fill pool
         for i in range(55):
             await client._get_session(f"http://proxy{i}:8080")
@@ -155,7 +156,7 @@ async def test_get_session_pool_eviction(client):
 
 @pytest.mark.asyncio
 async def test_invalidate_session(client):
-    with patch("instagram_mcp.client.AsyncSession") as mock_session_cls:
+    with patch("instagram_mcp.client.JitterAsyncSession") as mock_session_cls:
         mock_session = AsyncMock()
         mock_session_cls.return_value = mock_session
         proxy = "http://proxy:8080"
@@ -168,7 +169,7 @@ async def test_invalidate_session(client):
 
 @pytest.mark.asyncio
 async def test_close(client):
-    with patch("instagram_mcp.client.AsyncSession") as mock_session_cls:
+    with patch("instagram_mcp.client.JitterAsyncSession") as mock_session_cls:
         mock_session = AsyncMock()
         mock_session_cls.return_value = mock_session
         await client._get_session(None)
@@ -1381,3 +1382,112 @@ async def test_resolve_dm_thread_igid_raises_on_step2_redirect(client):
         with patch.object(client, "_cookie_str", return_value="sessionid=abc"):
             with pytest.raises(FetchError, match="redirected"):
                 await client.resolve_dm_thread_igid("testuser")
+
+
+@pytest.mark.asyncio
+async def test_fetch_profile_attempt_redirected(client):
+    """_fetch_profile_attempt must raise FetchError on redirect (302/301) to login."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 302
+    mock_resp.text = ""
+    with patch.object(client, "_get_session", new_callable=AsyncMock) as mock_get_session:
+        mock_session = mock_get_session.return_value
+        mock_session.get.return_value = mock_resp
+        
+        with pytest.raises(FetchError, match="redirected"):
+            await client._fetch_profile_attempt("testuser", None)
+
+
+@pytest.mark.asyncio
+async def test_fetch_graphql_attempt_redirected(client):
+    """_fetch_graphql_attempt must raise FetchError on redirect (302/301) to login."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 302
+    mock_resp.text = ""
+    with patch.object(client, "_get_session", new_callable=AsyncMock) as mock_get_session:
+        mock_session = mock_get_session.return_value
+        mock_session.get.return_value = mock_resp
+        
+        with pytest.raises(FetchError, match="redirected"):
+            await client._fetch_graphql_attempt("testuser", 12, None, None)
+
+
+@pytest.mark.asyncio
+async def test_fetch_tagged_posts_redirected(client):
+    """fetch_tagged_posts must raise FetchError on redirect (302/301) to login."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 302
+    mock_resp.text = ""
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post.return_value = mock_resp
+        with pytest.raises(FetchError, match="redirected"):
+            await client.fetch_tagged_posts("uid", "user")
+
+
+@pytest.mark.asyncio
+async def test_fetch_reposts_redirected(client):
+    """fetch_reposts must raise FetchError on redirect (302/301) to login."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 302
+    mock_resp.text = ""
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post.return_value = mock_resp
+        with pytest.raises(FetchError, match="redirected"):
+            await client.fetch_reposts("uid", "user")
+
+
+@pytest.mark.asyncio
+async def test_fetch_reels_redirected(client):
+    """fetch_reels must raise FetchError on redirect (302/301) to login."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 302
+    mock_resp.text = ""
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post.return_value = mock_resp
+        with pytest.raises(FetchError, match="redirected"):
+            await client.fetch_reels("uid", "user")
+
+
+@pytest.mark.asyncio
+async def test_fetch_location_posts_redirected(client):
+    """fetch_location_posts must raise FetchError on redirect (302/301) to login."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 302
+    mock_resp.text = ""
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post.return_value = mock_resp
+        with pytest.raises(FetchError, match="redirected"):
+            await client.fetch_location_posts("loc_id")
+
+
+@pytest.mark.asyncio
+async def test_fetch_audio_reels_redirected(client):
+    """fetch_audio_reels must raise FetchError on redirect (302/301) to login."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 302
+    mock_resp.text = ""
+    with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+        mock_session = mock_auth.return_value
+        mock_session.post.return_value = mock_resp
+        with pytest.raises(FetchError, match="redirected"):
+            await client.fetch_audio_reels("audio_id")
+
+
+@pytest.mark.asyncio
+async def test_fetch_highlights_redirected(client):
+    """fetch_highlights must raise FetchError on redirect (302/301) to login."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 302
+    mock_resp.text = ""
+    with patch.object(client, "fetch_user", new_callable=AsyncMock) as mock_fetch_user:
+        mock_fetch_user.return_value = {"pk": "12345", "is_verified": False}
+        with patch.object(client, "_get_auth_session", new_callable=AsyncMock) as mock_auth:
+            mock_session = mock_auth.return_value
+            mock_session.get.return_value = mock_resp
+            with pytest.raises(FetchError, match="redirected"):
+                await client.fetch_highlights("user_id")
+
