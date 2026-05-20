@@ -1,12 +1,13 @@
 name: instagram-mcp
-version: "2.0.0"
+version: "2.1.0"
 description: >
-  Production-grade MCP server for Instagram. 77 tools — 28 anonymous (no credentials),
+  Production-grade MCP server for Instagram. 79 tools — 30 anonymous (no credentials),
   48 authenticated, 1 auto-mode. Profile scraping, engagement analytics, DM inbox/send,
   hashtag research, stories, reels, uploads, social actions (like, follow, comment,
   block), batch scraping up to 2000 profiles, post scheduling, account monitoring,
-  multi-account sessions, and OAuth support. Built on curl_cffi with Chrome TLS
-  impersonation, adaptive rate limiting, and smart caching.
+  multi-account sessions, OAuth support, comment sentiment analysis (EN/UZ/RU),
+  multi-account pool with auto-failover, and challenge/2FA resolver. Built on
+  curl_cffi with Chrome TLS impersonation, adaptive rate limiting, and smart caching.
 
 startCommand:
   type: stdio
@@ -234,3 +235,9 @@ tools:
     description: Manage multiple Instagram accounts via INSTAGRAM_MCP_COOKIES_<ALIAS> env vars.
   - name: instagram_oauth
     description: Full Graph API OAuth 2.0 flow — init_flow, exchange_code, refresh_token, status.
+
+  # ── Analysis & Verification ───────────────────────────────────────────────────
+  - name: instagram_analyze_comments
+    description: Sentiment analysis on post comments — positive/neutral/negative with emoji stats and keywords (EN/UZ/RU). No login required.
+  - name: instagram_submit_verification_code
+    description: Submit SMS/Email/2FA code to resolve a pending Instagram checkpoint challenge and restore the account session. (AUTH)

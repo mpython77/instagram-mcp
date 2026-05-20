@@ -30,7 +30,7 @@ import json
 import logging
 from dataclasses import asdict
 
-__version__ = "1.0.0"
+__version__ = "2.1.0"
 
 logger = logging.getLogger("instagram_mcp")
 
