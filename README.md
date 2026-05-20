@@ -21,6 +21,13 @@ Works with **Claude Desktop**, **Claude Code**, and any MCP-compatible AI client
 ## Installation
 
 ```bash
+pip install instamcp
+instagram-mcp
+```
+
+Or from source:
+
+```bash
 git clone https://github.com/mpython77/instagram-mcp.git
 cd instagram-mcp
 pip install -e .
