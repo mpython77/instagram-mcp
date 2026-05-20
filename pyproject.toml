@@ -3,8 +3,8 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "instagram-mcp"
-version = "2.1.0"
+name = "instamcp"
+version = "2.1.1"
 description = "Production-grade MCP server for Instagram — 79 tools: scraping, DMs, scheduling, uploads, social actions, sentiment analysis, multi-account pool"
 readme = "README.md"
 requires-python = ">=3.10"
