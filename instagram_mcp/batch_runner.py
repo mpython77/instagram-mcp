@@ -299,7 +299,9 @@ class BatchRunner:
             # Once producer is done, sentinels are in the queue → workers will
             # drain and exit naturally. Wait for either all workers to finish
             # OR the writer to fail early (prevents deadlock on output_q).
-            workers_all_done = asyncio.create_task(asyncio.gather(*worker_tasks, return_exceptions=True))
+            # NOTE: asyncio.gather() returns a _GatheringFuture (not a coroutine),
+            # so we use ensure_future() which accepts both coroutines and futures.
+            workers_all_done = asyncio.ensure_future(asyncio.gather(*worker_tasks, return_exceptions=True))
             done, pending_tasks = await asyncio.wait(
                 [workers_all_done, writer_task],
                 return_when=asyncio.FIRST_COMPLETED
