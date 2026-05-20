@@ -12,7 +12,7 @@ Works with **Claude Desktop**, **Claude Code**, and any MCP-compatible AI client
 
 | Tier | Symbol | Requirement | Tools |
 |------|--------|-------------|-------|
-| Anonymous | 🌐 | None | 28 |
+| Anonymous | 🌐 | None | 30 |
 | Authenticated | 🔐 | `cookies.json` with valid Instagram session | 48 |
 | Auto-mode | 🌐/🔐 | Anon by default, upgrades when cookies present | 1 |
 
