@@ -2,7 +2,7 @@
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![MCP](https://img.shields.io/badge/MCP-compatible-green) ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey) [![CI](https://github.com/mpython77/instagram-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mpython77/instagram-mcp/actions/workflows/ci.yml) [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/mpython77/instagram-mcp/pkgs/container/instagram-mcp) [![PyPI](https://img.shields.io/badge/PyPI-instamcp-orange)](https://pypi.org/project/instamcp/) [![Smithery](https://img.shields.io/badge/Smithery-kelajak054%2Finstagram--mcp-purple)](https://smithery.ai/servers/kelajak054/instagram-mcp)
 
-Production-grade MCP server for Instagram. **79 tools** — 30 anonymous (no credentials), 48 authenticated, 1 auto-mode. Built on `curl_cffi` with Chrome TLS impersonation, adaptive rate limiting, smart caching, multi-account pool, and challenge/2FA resolver.
+Production-grade MCP server for Instagram. **76 tools** — 19 anonymous, 56 authenticated, 1 auto-mode. Built on `curl_cffi` with Chrome TLS impersonation, adaptive rate limiting, smart caching, multi-account pool, and challenge/2FA resolver.
 
 Works with **Claude Desktop**, **Claude Code**, and any MCP-compatible AI client.
 
@@ -12,8 +12,8 @@ Works with **Claude Desktop**, **Claude Code**, and any MCP-compatible AI client
 
 | Tier | Symbol | Requirement | Tools |
 |------|--------|-------------|-------|
-| Anonymous | 🌐 | None | 30 |
-| Authenticated | 🔐 | `cookies.json` with valid Instagram session | 48 |
+| Anonymous | 🌐 | None | 19 |
+| Authenticated | 🔐 | `cookies.json` with valid Instagram session | 56 |
 | Auto-mode | 🌐/🔐 | Anon by default, upgrades when cookies present | 1 |
 
 ---
@@ -239,11 +239,8 @@ docker run -d \
 | `instagram_dm_send` | Send a text message |
 | `instagram_dm_send_photo` | Send a photo |
 | `instagram_dm_send_video` | Send a video |
-| `instagram_dm_media_messages` | Fetch media messages in a thread |
 | `instagram_dm_react` | Add or remove an emoji reaction on a message |
 | `instagram_dm_unsend` | Delete a sent message |
-| `instagram_dm_mute` | Mute or unmute a thread |
-| `instagram_dm_share_post` | Share a post to a DM thread |
 | `instagram_dm_mark_seen` | Mark a thread as seen |
 
 ### 🔐 Upload & Download
@@ -275,6 +272,155 @@ docker run -d \
 
 ---
 
+## Tool Annotations
+
+Each tool declares MCP-standard annotation hints so hosts can render them with the correct UX (write warnings on destructive ops, fast-path on read-only ops). Generated from the runtime tool inventory.
+
+### profile
+
+| Tool | readOnly | idempotent | destructive | openWorld |
+|------|:---:|:---:|:---:|:---:|
+| `instagram_bulk_check` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_compare_profiles` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_feed_deep` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_profile` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_threads_posts` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_threads_profile` | ✓ | ✓ | ✗ | ✓ |
+
+### analysis
+
+| Tool | readOnly | idempotent | destructive | openWorld |
+|------|:---:|:---:|:---:|:---:|
+| `instagram_account_report` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_analyze_comments` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_analyze_engagement` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_caption_analyze` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_find_collab_network` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_hashtag_suggest` | ✓ | ✓ | ✗ | ✓ |
+
+### content
+
+| Tool | readOnly | idempotent | destructive | openWorld |
+|------|:---:|:---:|:---:|:---:|
+| `instagram_audio_reels` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_hashtag` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_hashtag_deep` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_highlights` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_location_posts` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_niche_top` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_post` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_post_bulk` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_post_comments` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_reels` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_reposts` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_stories` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_tagged_by` | ✓ | ✓ | ✗ | ✓ |
+
+### social_graph
+
+| Tool | readOnly | idempotent | destructive | openWorld |
+|------|:---:|:---:|:---:|:---:|
+| `instagram_account_privacy` | ✗ | ✗ | ✓ | ✓ |
+| `instagram_activity_feed` | ✓ | ✓ | ✗ | ✗ |
+| `instagram_block_user` | ✗ | ✓ | ✓ | ✗ |
+| `instagram_broadcast_channel` | ✗ | ✗ | ✓ | ✓ |
+| `instagram_comment_hide` | ✗ | ✗ | ✓ | ✓ |
+| `instagram_comment_like` | ✗ | ✗ | ✓ | ✓ |
+| `instagram_comment_reply` | ✗ | ✗ | ✗ | ✗ |
+| `instagram_compare_followers` | ✓ | ✓ | ✗ | ✗ |
+| `instagram_delete_comment` | ✗ | ✗ | ✓ | ✗ |
+| `instagram_edit_profile` | ✗ | ✗ | ✓ | ✓ |
+| `instagram_follow_user` | ✗ | ✗ | ✓ | ✓ |
+| `instagram_followers_list` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_following_list` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_home_feed` | ✓ | ✓ | ✗ | ✗ |
+| `instagram_liked_posts` | ✓ | ✓ | ✗ | ✗ |
+| `instagram_media_insights` | ✓ | ✓ | ✗ | ✗ |
+| `instagram_post_comment` | ✗ | ✗ | ✗ | ✗ |
+| `instagram_post_delete` | ✗ | ✗ | ✓ | ✗ |
+| `instagram_post_like` | ✗ | ✗ | ✓ | ✓ |
+| `instagram_post_likers` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_post_save` | ✗ | ✗ | ✓ | ✓ |
+| `instagram_publish_story` | ✗ | ✗ | ✗ | ✗ |
+| `instagram_saved_posts` | ✓ | ✓ | ✗ | ✗ |
+| `instagram_search` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_similar_accounts` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_story_mark_seen` | ✗ | ✗ | ✓ | ✓ |
+| `instagram_story_reply` | ✗ | ✗ | ✗ | ✗ |
+| `instagram_submit_verification_code` | ✗ | ✗ | ✗ | ✗ |
+| `instagram_toggle_comments` | ✗ | ✗ | ✓ | ✓ |
+| `instagram_upload_video` | ✗ | ✗ | ✗ | ✗ |
+| `instagram_user_followers` | ✓ | ✓ | ✗ | ✗ |
+| `instagram_user_following` | ✓ | ✓ | ✗ | ✗ |
+| `instagram_user_id_lookup` | ✓ | ✓ | ✗ | ✗ |
+| `instagram_user_search` | ✓ | ✓ | ✗ | ✗ |
+
+### dm
+
+| Tool | readOnly | idempotent | destructive | openWorld |
+|------|:---:|:---:|:---:|:---:|
+| `instagram_dm_inbox` | ✓ | ✓ | ✗ | ✗ |
+| `instagram_dm_mark_seen` | ✗ | ✗ | ✓ | ✗ |
+| `instagram_dm_react` | ✗ | ✗ | ✓ | ✗ |
+| `instagram_dm_send` | ✗ | ✗ | ✓ | ✗ |
+| `instagram_dm_send_photo` | ✗ | ✗ | ✓ | ✗ |
+| `instagram_dm_send_video` | ✗ | ✗ | ✓ | ✗ |
+| `instagram_dm_thread` | ✓ | ✓ | ✗ | ✗ |
+| `instagram_dm_unsend` | ✗ | ✗ | ✓ | ✗ |
+
+### upload
+
+| Tool | readOnly | idempotent | destructive | openWorld |
+|------|:---:|:---:|:---:|:---:|
+| `instagram_download` | ✓ | ✓ | ✗ | ✓ |
+| `instagram_upload_photo` | ✗ | ✗ | ✓ | ✓ |
+| `instagram_upload_reel` | ✗ | ✗ | ✓ | ✓ |
+
+### automation
+
+| Tool | readOnly | idempotent | destructive | openWorld |
+|------|:---:|:---:|:---:|:---:|
+| `instagram_batch_scrape` | ✓ | ✗ | ✗ | ✓ |
+| `instagram_monitor` | ✗ | ✗ | ✗ | ✓ |
+| `instagram_oauth` | ✗ | ✗ | ✗ | ✓ |
+| `instagram_schedule` | ✗ | ✗ | ✗ | ✗ |
+| `instagram_sessions` | ✗ | ✗ | ✗ | ✗ |
+
+### server
+
+| Tool | readOnly | idempotent | destructive | openWorld |
+|------|:---:|:---:|:---:|:---:|
+| `instagram_server` | ✓ | ✓ | ✗ | ✗ |
+
+---
+
+## Resources
+
+The server exposes three MCP Resources for direct AI consumption (no tool call required):
+
+| URI Template | Name | Description | MIME Type |
+|---|---|---|---|
+| `instagram://profile/{username}` | Instagram Profile Cache | Cached profile data; refreshes via API on miss | application/json |
+| `instagram://feed/{username}` | Instagram Feed Cache | Cached recent feed (tags, posts) | application/json |
+| `instagram://server/status` | Instagram MCP Server Status | Live cache hit rate, proxy health, rate limiter stats | application/json |
+
+---
+
+## Prompts
+
+The server exposes ready-made LLM workflow templates:
+
+| Name | Parameters (with defaults) | Description |
+|---|---|---|
+| `analyze_influencer` | `username`, `niche=""`, `goal="brand partnership"` | Full influencer vetting pipeline: profile, engagement, collab network, scored verdict. |
+| `find_brand_collaborations` | `username`, `max_posts=100` | Discover brand deals, paid sponsors, recurring brand mentions. |
+| `competitive_analysis` | `usernames` (comma-separated), `metric_focus="engagement"` | Compare 2-5 accounts for competitive intelligence. |
+| `account_audit` | `username`, `dead_threshold_days=365` | Health audit: activity status, growth signals, content consistency. |
+| `discover_creators` | `seed_username`, `min_followers=1000`, `min_frequency=2`, `max_posts=50` | Find similar creators by traversing the seed account's tag network. |
+| `validate_prospect_list` | `usernames` (comma-separated), `min_followers=1000`, `goal="influencer outreach"` | Score and rank a prospect list for outreach qualification. |
+
+---
+
 ## Limitations
 
 - **Private accounts:** Feed, posts, stories, and highlights are not accessible without following the account.
@@ -287,10 +433,40 @@ docker run -d \
 
 ---
 
+## Error Taxonomy
+
+Every `ToolError` raised by this server carries one of these `error_type` values:
+
+| `error_type` | Description | Typical example |
+|---|---|---|
+| `validation_error` | Input parameter violated a constraint. | Empty username, unknown action verb. |
+| `not_found` | Target resource does not exist on Instagram. | `@user` not found (404), post deleted. |
+| `private_account` | Target is private; data not accessible. | Public profile metadata returned, but feed denied. |
+| `auth_required` | Tool needs valid cookies; none loaded. | `instagram_dm_send` called anonymously. |
+| `rate_limited` | All proxies exhausted by 429 responses. | Sustained 429s open the circuit breaker. |
+| `network_error` | Proxy / TLS / DNS failure outside Instagram's control. | All configured proxies unhealthy. |
+| `fetch_error` | HTTP request failed for non-rate, non-network reasons. | Unexpected 500, malformed JSON. |
+| `unexpected_error` | Catch-all for unmapped Python exceptions. | Programmer error surfaced as a tool error. |
+
+---
+
+## Pre-commit Setup (recommended)
+
+Install the pre-commit hook to block accidental commits of cookies, `*.env`, or `secrets.*` files:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+The hooks run automatically on `git commit`. See `SECURITY.md` for the full secret policy and incident playbook.
+
+---
+
 ## FAQ
 
 **Do I need to log in?**  
-No. 30 tools work anonymously with no credentials. 48 tools require `cookies.json`. `instagram_hashtag` auto-switches based on whether cookies are present.
+No. 19 tools work anonymously with no credentials. 56 tools require `cookies.json`. `instagram_hashtag` auto-switches based on whether cookies are present.
 
 **Why `curl_cffi` instead of `requests`?**  
 Instagram blocks `requests` and `aiohttp` at the TLS handshake level by JA3/JA4 fingerprint. `curl_cffi` impersonates Chrome's TLS stack, bypassing this check.

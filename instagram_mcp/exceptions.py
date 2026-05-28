@@ -8,13 +8,50 @@ For LLM, each exception contains:
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
+
+# ---------------------------------------------------------------------------
+# ToolError taxonomy (Requirement 18.1, 18.2)
+# ---------------------------------------------------------------------------
+#
+# `ErrorType` is the closed set of `error_type` values that any `ToolError`
+# raised by this server may carry. The matching runtime validator lives in
+# `instagram_mcp/tools/_helpers.py::_tool_error`; that module imports
+# `ALLOWED_ERROR_TYPES` from here, so this file owns the canonical listing
+# and `_helpers` does not redefine it.
+#
+# Exception classes below still use their pre-refactor `error_type` strings;
+# they are remapped onto this taxonomy in task 1.3.
+
+ErrorType = Literal[
+    "validation_error",
+    "not_found",
+    "private_account",
+    "auth_required",
+    "rate_limited",
+    "network_error",
+    "fetch_error",
+    "unexpected_error",
+]
+
+ALLOWED_ERROR_TYPES: frozenset[str] = frozenset(
+    {
+        "validation_error",
+        "not_found",
+        "private_account",
+        "auth_required",
+        "rate_limited",
+        "network_error",
+        "fetch_error",
+        "unexpected_error",
+    }
+)
 
 
 class InstagramMCPError(Exception):
     """Base class for all Instagram MCP errors."""
 
-    error_type: str = "unknown_error"
+    error_type: str = "unexpected_error"
     suggested_action: str = "Try again or check configuration."
 
     def __init__(self, message: str = "", **kwargs):
@@ -44,7 +81,7 @@ class UserNotFoundError(InstagramMCPError):
 class PostNotFoundError(InstagramMCPError):
     """Post shortcode not found (404) or deleted."""
 
-    error_type = "post_not_found"
+    error_type = "not_found"
     suggested_action = (
         "Verify the post shortcode or URL is correct. "
         "The post may have been deleted or the account may be private."
@@ -131,7 +168,7 @@ class FetchError(InstagramMCPError):
 class ProxyError(InstagramMCPError):
     """Proxy related error — all proxies down/invalid."""
 
-    error_type = "proxy_error"
+    error_type = "network_error"
     suggested_action = (
         "All configured proxies are currently unavailable. "
         "The system will fall back to direct connection if enabled. "
@@ -153,7 +190,7 @@ class ProxyError(InstagramMCPError):
 class ConfigError(InstagramMCPError):
     """Configuration error."""
 
-    error_type = "config_error"
+    error_type = "validation_error"
     suggested_action = (
         "Check environment variables and configuration. "
         "Refer to README for proper setup."
@@ -163,7 +200,7 @@ class ConfigError(InstagramMCPError):
 class AccountSuspendedError(InstagramMCPError):
     """Instagram returned account suspension indicators."""
 
-    error_type = "account_suspended"
+    error_type = "unexpected_error"
     suggested_action = (
         "The account appears to be suspended by Instagram. "
         "No further requests can be made for this account until it is reinstated."

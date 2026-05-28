@@ -39,6 +39,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Set
 
+from ._path_guard import ensure_path
+
 
 @dataclass
 class MCPConfig:
@@ -269,17 +271,17 @@ class MCPConfig:
 
         # Authentication
         if v := os.environ.get("INSTAGRAM_MCP_COOKIES"):
-            cfg.cookies_path = v
+            cfg.cookies_path = ensure_path(v, name="instagram_mcp_cookies")
         if v := os.environ.get("INSTAGRAM_MCP_ACCOUNTS_DIR"):
-            cfg.accounts_dir = v
+            cfg.accounts_dir = ensure_path(v, name="instagram_mcp_accounts_dir")
         if v := os.environ.get("INSTAGRAM_MCP_MEDIA_CACHE_DIR"):
-            cfg.media_cache_dir = v
+            cfg.media_cache_dir = ensure_path(v, name="instagram_mcp_media_cache_dir")
 
         # JSON auto-export
         if os.environ.get("INSTAGRAM_MCP_EXPORT_ENABLED", "").lower() in ("0", "false"):
             cfg.export_enabled = False
         if v := os.environ.get("INSTAGRAM_MCP_EXPORT_DIR"):
-            cfg.export_dir = v
+            cfg.export_dir = ensure_path(v, name="instagram_mcp_export_dir")
         if v := os.environ.get("INSTAGRAM_MCP_EXPORT_INDENT"):
             cfg.export_indent = int(v)
 

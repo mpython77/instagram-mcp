@@ -36,6 +36,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ._path_guard import ensure_path
+
 __all__ = ["JsonExporter"]
 
 logger = logging.getLogger("instagram_mcp.exporter")
@@ -566,6 +568,7 @@ class JsonExporter:
         indent: int = 2,
         enabled: bool = True,
     ) -> None:
+        export_dir = ensure_path(export_dir, name="export_dir")
         self._export_dir = Path(export_dir).expanduser().resolve()
         self.indent = max(0, int(indent))
         self.enabled = bool(enabled)

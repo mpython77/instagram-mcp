@@ -113,6 +113,8 @@ class CookieManager:
             path,
             len(self._cookies),
         )
+        # NOTE: only the cookie file path and a count are logged here —
+        # cookie names and values are never emitted (Requirement 23.1, 23.2).
         self._loaded = True
         return True
 
@@ -185,6 +187,8 @@ class CookieManager:
                 self._lsd = lsd
                 self._csrf_fetched_at = now
                 self._csrf_cache = (fb_dtsg, lsd)
+                # Log only a 12-char prefix of fb_dtsg, never the full token —
+                # Requirement 23.1 (no raw CSRF/OAuth tokens in logs).
                 logger.debug("CSRF tokens refreshed (fb_dtsg=%s…)", fb_dtsg[:12])
             else:
                 # If we have old tokens and refresh failed, we might want to retry
@@ -360,6 +364,7 @@ async def _fetch_csrf_tokens(session, cookies: Dict[str, str]) -> Tuple[Optional
                 break
 
         if fb_dtsg and lsd:
+            # Log only a 12-char prefix of the token — Requirement 23.1.
             logger.debug("CSRF tokens extracted from %s (fb_dtsg=%s…)", url, fb_dtsg[:12])
             return fb_dtsg, lsd
 

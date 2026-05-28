@@ -5,12 +5,15 @@ import asyncio
 from pathlib import Path
 from typing import Dict, Optional, Tuple, List
 from .cookie_manager import CookieManager
+from ._path_guard import ensure_path
 
 logger = logging.getLogger("instagram_mcp.accounts")
 
 class AccountPool:
     """Manages a rotating pool of Instagram accounts with health tracking and auto-failover."""
     def __init__(self, accounts_dir: Optional[str] = None):
+        if accounts_dir:
+            accounts_dir = ensure_path(accounts_dir, name="accounts_dir")
         self.accounts_dir = Path(accounts_dir) if accounts_dir else Path.cwd() / "data" / "accounts"
         self.accounts: Dict[str, CookieManager] = {}
         # Health states: "active", "rate_limited", "checkpoint_required", "expired"

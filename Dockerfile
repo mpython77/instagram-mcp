@@ -5,6 +5,10 @@ WORKDIR /build
 
 RUN pip install --no-cache-dir --upgrade pip build
 
+# Security: COPY uses an explicit allowlist of build inputs (no `COPY . .`).
+# Sensitive artefacts (cookies.json, cookies.txt, cookie.txt, *.env, secrets.*,
+# MagicMock/, exports/, data/, dist/, *.mcpb) are additionally excluded by
+# `.dockerignore` at the repo root. See SECURITY.md for the full secret list.
 COPY pyproject.toml requirements.txt ./
 COPY instagram_mcp/ instagram_mcp/
 COPY README.md LICENSE ./

@@ -6,12 +6,15 @@ from pathlib import Path
 from typing import Optional
 from curl_cffi.requests import AsyncSession
 from .exceptions import FetchError
+from ._path_guard import ensure_path
 
 logger = logging.getLogger("instagram_mcp.media_cache")
 
 class MediaCache:
     """Caches Instagram media (images/videos) locally to avoid CDN URL expiration."""
     def __init__(self, cache_dir: Optional[str] = None):
+        if cache_dir:
+            cache_dir = ensure_path(cache_dir, name="media_cache_dir")
         self.cache_dir = Path(cache_dir) if cache_dir else Path.cwd() / "data" / "media_cache"
         self._ensure_dir()
 
