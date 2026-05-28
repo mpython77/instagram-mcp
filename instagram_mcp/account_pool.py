@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple, List
 from .cookie_manager import CookieManager
 from ._path_guard import ensure_path
+from .state_store import AccountSnapshot
+from .metrics import ACCOUNT_POOL_STATE
 
 logger = logging.getLogger("instagram_mcp.accounts")
 
@@ -68,6 +70,7 @@ class AccountPool:
                     cooldown_until = self.cooldowns.get(alias, 0.0)
                     if now >= cooldown_until:
                         self.statuses[alias] = "active"
+                        self._emit_account_state_metric(alias, "active")
                         logger.info("Account '%s' recovered from rate-limiting cooldown", alias)
                         
                 if self.statuses[alias] == "active":
@@ -82,23 +85,31 @@ class AccountPool:
             selected = active_members[self._index]
             return selected, self.accounts[selected]
 
+    def _emit_account_state_metric(self, alias: str, status: str) -> None:
+        """Update ACCOUNT_POOL_STATE gauge so exactly one state label per alias holds value 1."""
+        for s in ("active", "rate_limited", "checkpoint_required", "expired"):
+            ACCOUNT_POOL_STATE.labels(alias=alias, state=s).set(1 if status == s else 0)
+
     def mark_rate_limited(self, alias: str, cooldown_seconds: int = 900) -> None:
         """Mark account as rate limited with a cooldown period."""
         if alias in self.accounts:
             self.statuses[alias] = "rate_limited"
             self.cooldowns[alias] = time.time() + cooldown_seconds
+            self._emit_account_state_metric(alias, "rate_limited")
             logger.warning("Account '%s' marked as rate-limited for %d seconds", alias, cooldown_seconds)
 
     def mark_checkpoint(self, alias: str) -> None:
         """Mark account as requiring challenge / checkpoint verification."""
         if alias in self.accounts:
             self.statuses[alias] = "checkpoint_required"
+            self._emit_account_state_metric(alias, "checkpoint_required")
             logger.error("Account '%s' marked as checkpoint_required (verification needed)", alias)
 
     def mark_expired(self, alias: str) -> None:
         """Mark account cookies as expired."""
         if alias in self.accounts:
             self.statuses[alias] = "expired"
+            self._emit_account_state_metric(alias, "expired")
             logger.error("Account '%s' marked as expired (session invalid)", alias)
 
     def restore_account(self, alias: str) -> bool:
@@ -106,6 +117,7 @@ class AccountPool:
         if alias in self.accounts:
             self.statuses[alias] = "active"
             self.cooldowns[alias] = 0.0
+            self._emit_account_state_metric(alias, "active")
             logger.info("Account '%s' restored to active pool", alias)
             return True
         return False
@@ -120,3 +132,38 @@ class AccountPool:
             }
             for alias in self.accounts
         }
+
+    def to_snapshot(self) -> list[AccountSnapshot]:
+        """Return a list of AccountSnapshot for all pool members (no cookies/tokens included)."""
+        snapshots: list[AccountSnapshot] = []
+        for alias in self.accounts.keys():
+            snapshots.append(
+                AccountSnapshot(
+                    alias=alias,
+                    status=self.statuses.get(alias, "active"),
+                    cooldown_until_epoch=int(self.cooldowns.get(alias, 0)),
+                    consecutive_failures=0,
+                )
+            )
+        return snapshots
+
+    def restore_from_snapshot(self, accounts: list[AccountSnapshot]) -> None:
+        """Restore account pool state from a list of AccountSnapshot.
+
+        Only restores state for aliases that currently exist in self.accounts.
+        If cooldown_until_epoch is in the past, resets the account to active.
+        """
+        now = time.time()
+        for snap in accounts:
+            if snap.alias not in self.accounts:
+                # Account may have been removed from the pool; skip
+                continue
+            if snap.cooldown_until_epoch < now:
+                # Cooldown has expired; reset to active
+                self.statuses[snap.alias] = "active"
+                self.cooldowns[snap.alias] = 0
+                self._emit_account_state_metric(snap.alias, "active")
+            else:
+                self.statuses[snap.alias] = snap.status
+                self.cooldowns[snap.alias] = snap.cooldown_until_epoch
+                self._emit_account_state_metric(snap.alias, snap.status)

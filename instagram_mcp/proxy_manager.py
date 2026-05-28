@@ -19,7 +19,9 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Set
 
+from .metrics import PROXY_STATE
 from .models import ProxyStatus
+from .state_store import ProxySnapshot
 
 logger = logging.getLogger("instagram_mcp.proxy_manager")
 
@@ -66,6 +68,15 @@ def _validate_proxy_url(url: str) -> None:
 def _mask_proxy_url(url: str) -> str:
     """Hide user/password from proxy URL."""
     return re.sub(r"//[^@]+@", "//***@", url)
+
+
+def _emit_proxy_state_metric(p: "_ProxyState") -> None:
+    """Update PROXY_STATE gauge so exactly one state label per proxy_id holds value 1."""
+    proxy_id = _mask_proxy_url(p.url)
+    for s in ("closed", "open", "half_open"):
+        PROXY_STATE.labels(proxy_id=proxy_id, state=s).set(
+            1 if p.cb_state.value == s else 0
+        )
 
 
 @dataclass(slots=True)
@@ -347,6 +358,7 @@ class ProxyManager:
                 p.cb_state = ProxyCircuitState.CLOSED
                 p.cb_half_open_in_flight = False
                 p.cb_cooldown_seconds = 0.0
+                _emit_proxy_state_metric(p)
                 logger.info(
                     "Circuit breaker CLOSED (probe succeeded): %s",
                     _mask_proxy_url(p.url),
@@ -384,6 +396,7 @@ class ProxyManager:
                 p.cooldown_until = now + p.cb_cooldown_seconds
                 p.is_active = False
                 self._cb_opens_total += 1
+                _emit_proxy_state_metric(p)
                 logger.warning(
                     "Circuit breaker re-OPEN (probe failed): %s — cooldown %.0fs",
                     _mask_proxy_url(p.url),
@@ -399,6 +412,7 @@ class ProxyManager:
                 p.cooldown_until = now + p.cb_cooldown_seconds
                 p.is_active = False
                 self._cb_opens_total += 1
+                _emit_proxy_state_metric(p)
                 logger.warning(
                     "Circuit breaker OPEN (%dx consecutive fails): %s — cooldown %.0fs",
                     p.consecutive_fails,
@@ -483,6 +497,64 @@ class ProxyManager:
                 p.cb_cooldown_seconds = 0.0
                 p.cb_half_open_in_flight = False
                 p.active_requests = 0
+
+    # ── Snapshot / restore ──────────────────────────────────────────────────
+
+    def to_snapshot(self) -> list[ProxySnapshot]:
+        """Build a list of ProxySnapshot for state persistence."""
+        result: list[ProxySnapshot] = []
+        for p in self._proxies:
+            result.append(
+                ProxySnapshot(
+                    proxy_url=p.url,
+                    cb_state=p.cb_state.value,
+                    cb_until_epoch=int(p.cooldown_until),
+                    consecutive_failures=p.consecutive_fails,
+                    total_requests=p.total_requests,
+                    total_failures=p.total_requests - p.total_success,
+                )
+            )
+        return result
+
+    def restore_from_snapshot(self, proxies: list[ProxySnapshot]) -> None:
+        """Restore circuit breaker state from a list of ProxySnapshot.
+
+        Proxies whose cb_until_epoch is in the past are treated as expired
+        and reset to baseline (CLOSED, active, zero failures).
+        Proxies not found in the current configuration are silently skipped.
+        """
+        now = time.time()
+        for snap in proxies:
+            p = self._by_url.get(snap.proxy_url)
+            if p is None:
+                # Proxy was removed from config — skip
+                continue
+
+            if snap.cb_until_epoch < now:
+                # Cooldown expired — reset to baseline
+                p.cb_state = ProxyCircuitState.CLOSED
+                p.is_active = True
+                p.consecutive_fails = 0
+            else:
+                # Restore persisted state
+                p.cb_state = ProxyCircuitState(snap.cb_state)
+                p.cooldown_until = snap.cb_until_epoch
+                p.consecutive_fails = snap.consecutive_failures
+                p.is_active = p.cb_state is ProxyCircuitState.CLOSED
+
+            p.total_requests = snap.total_requests
+            p.total_success = snap.total_requests - snap.total_failures
+
+    def snapshot_for_health(self) -> list[dict]:
+        """Return lightweight proxy state info for the health/readiness endpoint."""
+        return [
+            {
+                "proxy_url": _mask_proxy_url(p.url),
+                "state": p.cb_state.value,
+                "is_active": p.is_active,
+            }
+            for p in self._proxies
+        ]
 
     # ── Status / diagnostics ─────────────────────────────────────────────────
 

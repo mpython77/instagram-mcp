@@ -20,6 +20,9 @@ import logging
 import random
 import time
 
+from instagram_mcp.metrics import RATE_LIMITER_RPS
+from instagram_mcp.state_store import RateLimiterSnapshot
+
 logger = logging.getLogger("instagram_mcp.rate_limiter")
 
 
@@ -153,6 +156,7 @@ class AdaptiveRateLimiter:
             self._consecutive_429s += 1
             self._consecutive_successes = 0
             self._total_429s += 1
+            RATE_LIMITER_RPS.labels(scope="global").set(self._rate)
             logger.warning(
                 "Rate limited! Rate decreased: %.2f → %.2f rps "
                 "(backoff #%d, consecutive_429s=%d)",
@@ -194,6 +198,7 @@ class AdaptiveRateLimiter:
                 )
 
             self._rate = min(self._max_rate, self._rate * self._recovery_factor)
+            RATE_LIMITER_RPS.labels(scope="global").set(self._rate)
             if self._in_backoff and self._rate >= self._base_rate * 0.9:
                 self._in_backoff = False
                 self._backoff_count = 0
@@ -228,6 +233,26 @@ class AdaptiveRateLimiter:
             "consecutive_429s": self._consecutive_429s,
             **self.get_metrics(),
         }
+
+    def to_snapshot(self, scope: str = "global") -> RateLimiterSnapshot:
+        """Serialize current rate limiter state to a persistable snapshot."""
+        return RateLimiterSnapshot(
+            scope=scope,
+            current_rps=self._rate,
+            max_rate=self._max_rate,
+            consecutive_429s=self._consecutive_429s,
+            consecutive_successes=self._consecutive_successes,
+        )
+
+    def restore_from_snapshot(self, snapshot: RateLimiterSnapshot) -> None:
+        """Restore rate limiter state from a previously persisted snapshot."""
+        # Clamp current_rps into [min_rate, base_rate * 2.5]
+        clamped_rps = max(self._min_rate, min(snapshot.current_rps, self._base_rate * 2.5))
+        self._rate = clamped_rps
+        # Don't exceed the absolute ceiling
+        self._max_rate = min(snapshot.max_rate, self._max_rate_ceiling)
+        self._consecutive_429s = snapshot.consecutive_429s
+        self._consecutive_successes = snapshot.consecutive_successes
 
 
 class PerProxyRateLimiter:
@@ -336,3 +361,13 @@ class PerProxyRateLimiter:
                 for url, lim in self._limiters.items()
             },
         }
+
+    def to_snapshot(self) -> list[RateLimiterSnapshot]:
+        """Serialize all per-proxy rate limiter states to persistable snapshots."""
+        return [lim.to_snapshot(scope=url) for url, lim in self._limiters.items()]
+
+    async def restore_from_snapshot(self, snapshots: list[RateLimiterSnapshot]) -> None:
+        """Restore per-proxy rate limiter states from previously persisted snapshots."""
+        for snap in snapshots:
+            lim = await self._get_or_create(snap.scope)
+            lim.restore_from_snapshot(snap)
