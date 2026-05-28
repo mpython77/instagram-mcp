@@ -1,0 +1,45 @@
+# Pre-commit hook configuration for instagram-mcp.
+#
+# These hooks block commits that would introduce cookie / secret material
+# into the repository, plus a few standard hygiene checks. See SECURITY.md
+# for the full secret-handling policy and incident playbook.
+#
+# Install:
+#   pip install pre-commit
+#   pre-commit install
+
+default_language_version:
+  python: python3
+
+repos:
+  # Local hook: block known cookie / secret file paths from being committed.
+  # Implementation lives in scripts/check_no_secrets.py and uses only the
+  # standard library so it works without network access.
+  - repo: local
+    hooks:
+      - id: forbid-cookies
+        name: Forbid cookie / secret files in commit
+        entry: python scripts/check_no_secrets.py
+        language: system
+        pass_filenames: true
+        types: [file]
+        always_run: false
+
+  # gitleaks: scan staged content for secret-shaped strings (tokens, keys).
+  # Pinned to a known stable release; bump deliberately after reviewing
+  # the gitleaks changelog.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+        args: ["protect", "--staged", "--redact"]
+
+  # Standard hygiene hooks.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=512"]

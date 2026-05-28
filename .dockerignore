@@ -1,0 +1,38 @@
+# .dockerignore
+#
+# Mirrors the secret/cache entries from .gitignore so sensitive artefacts
+# and local-only state are never baked into the container image.
+# Entries are grouped by section header for readability.
+
+# --- Credentials & sessions (NEVER ship in image) ---
+cookie.txt
+cookies.json
+cookies.txt
+**/cookies.json
+**/cookies.txt
+*.env
+secrets.*
+
+# --- Test fixtures & generated data ---
+MagicMock/
+exports/
+data/
+
+# --- Build & distribution artefacts ---
+dist/
+*.mcpb
+
+# --- Caches & local state ---
+.pytest_cache/
+.state/
+.venv/
+
+# --- VCS metadata ---
+.git/
+
+# --- Python bytecode caches ---
+__pycache__/
+*.pyc
+
+# --- Spec & internal tooling docs (not for runtime image) ---
+.kiro/

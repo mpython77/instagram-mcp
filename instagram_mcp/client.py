@@ -226,7 +226,12 @@ class InstagramClient:
                     await old_session.close()
                 except Exception:
                     pass
-                logger.debug("Session pool evicted: %s (pool full)", oldest_key)
+                # Pool keys are proxy URLs (or the literal "direct"); mask any
+                # embedded credentials before logging — Requirement 23.1.
+                logger.debug(
+                    "Session pool evicted: %s (pool full)",
+                    _mask_proxy(oldest_key) if oldest_key != "direct" else oldest_key,
+                )
             self._session_pool[pool_key] = session
             logger.debug("New AsyncSession created for: %s", _mask_proxy(proxy_url))
             return session

@@ -82,7 +82,7 @@ async def test_mcp_tool_instagram_analyze_comments():
         "has_more": False
     })
     
-    with patch("instagram_mcp.tools.parse_comments", return_value=[mock_comment]):
+    with patch("instagram_mcp.tools.analysis.parse_comments", return_value=[mock_comment]):
         # Call register_tools
         register_tools(mcp, client, config, exporter)
         

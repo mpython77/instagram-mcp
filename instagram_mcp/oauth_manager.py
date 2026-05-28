@@ -164,6 +164,8 @@ class OAuthManager:
         }
         self._tokens = entry
         self._save(entry)
+        # Log only the expiry timestamp; the access_token itself is never logged
+        # (Requirement 23.1 — OAuth tokens redacted from logs).
         logger.info("OAuth tokens saved — expires %s", _ts_str(entry["expires_at"]))
         return self._public_status()
 
@@ -206,6 +208,8 @@ class OAuthManager:
         }
         self._tokens = entry
         self._save(entry)
+        # Same redaction policy as exchange_code — only expiry is logged
+        # (Requirement 23.1).
         logger.info("OAuth token refreshed — expires %s", _ts_str(entry["expires_at"]))
         return self._public_status()
 

@@ -73,7 +73,12 @@ class ChallengeResolver:
         }
 
         try:
-            logger.info("Submitting verification code '%s' for '%s' to %s", code, alias, url)
+            # Verification codes are short-lived single-use credentials; log only
+            # a length hint and the alias/url, never the code itself — Requirement 23.1.
+            logger.info(
+                "Submitting verification code (len=%d) for '%s' to %s",
+                len(code), alias, url,
+            )
             resp = await session.post(url, data=payload, headers=headers, timeout=20, allow_redirects=False)
             
             if resp.status_code == 200:

@@ -2,14 +2,17 @@
 instagram_mcp — World-class Instagram data MCP server.
 
 Architecture:
-  - 12 MCP Tools: profile, tags, feed, bulk, engagement, collab, compare, batch
-  - MCP Resources: live cache exposure for profile + feed data
-  - MCP Prompts: ready-made LLM analysis templates
+  - MCP Tools: registered dynamically by the per-toolset registrars in
+    instagram_mcp.tools.*. The authoritative runtime inventory is exposed
+    on `mcp._instagram_tool_inventory` after `register_tools` returns;
+    the README tool table is the user-facing reference.
+  - MCP Resources: live cache exposure for profile + feed data.
+  - MCP Prompts: ready-made LLM analysis templates.
   - Smart proxy management (auto-rotation, health check, fallback)
   - TTL cache (LRU eviction) with background cleanup
   - Adaptive rate limiter (token-bucket + circuit breaker)
   - Session pooling (thread-safe, curl_cffi)
-  - Full pagination (up to 200 posts via v1/feed/user + max_id)
+  - Full pagination via v1/feed/user + max_id
   - Context-aware tools: MCP-native progress reporting + logging
 
 Transports supported:
@@ -76,7 +79,7 @@ def create_mcp_server():
     if cookie_manager.is_authenticated:
         logger.info("instagram_mcp: authenticated session loaded from cookies.txt")
     else:
-        logger.info("instagram_mcp: no cookies.txt — running in anonymous mode (10/14 tools available)")
+        logger.info("instagram_mcp: no cookies.txt — running in anonymous mode")
 
     cache = SmartCache(
         max_entries=config.cache_max_entries,
@@ -220,87 +223,37 @@ def create_mcp_server():
         host=_host if _http else "127.0.0.1",
         port=_port if _http else 8000,
         log_level="INFO",
-        instructions=(
-            f"Instagram data server — {_auth_status}.\n\n"
-            "AUTH TIERS:\n"
-            "• 🌐 NO LOGIN REQUIRED — 11 anonymous tools, no credentials needed.\n"
-            "• 🔐 AUTH REQUIRED — 8 tools require cookies.json/cookies.txt with a valid "
-            "Instagram session. Each tool's docstring starts with its tier marker.\n"
-            "• 🌐/🔐 AUTO-MODE — 1 tool (instagram_hashtag) works anonymously but upgrades "
-            "automatically to auth mode when cookies are present.\n\n"
-            "TOOLS (19 total):\n"
-            "• 🌐 instagram_profile — profile metadata + optional feed tags (up to 12 posts) "
-            "+ activity status. One API call covers profile, tags, mentions, dead-account check. "
-            "Set include_feed=False for fastest profile-only lookup.\n"
-            "• 🌐 instagram_feed_deep — paginated feed analysis up to 200 posts. "
-            "Builds on instagram_profile but fetches many more posts for trend analysis.\n"
-            "• 🌐 instagram_analyze_engagement — engagement rate %, content mix by type, "
-            "best posting days, top posts, top hashtags. Uses pagination.\n"
-            "• 🌐 instagram_find_collab_network — maps usertags, @mentions, co-authors, "
-            "and paid sponsors across recent posts. Use min_frequency to filter regulars.\n"
-            "• 🌐 instagram_compare_profiles — side-by-side table for 2-5 accounts in parallel.\n"
-            "• 🌐 instagram_bulk_check — fetch up to 20 accounts in parallel with status for each.\n"
-            "• 🌐 instagram_batch_scrape — HIGH-CONCURRENCY large-scale scraping up to 2000 profiles "
-            "(max_workers 1-100). TURBO MODE: profile_only=True gives 30-60x speedup (no feed fetch) — "
-            "use for bulk follower/bio scraping. stream_jsonl=True appends live to .jsonl. "
-            "Auto fail-fast at 60% error rate. Resume support: re-run with same output_file. "
-            "For 1000+ accounts pick max_workers=50-100 + profile_only=True.\n"
-            "• 🌐 instagram_server — server diagnostics (action='status') or cache management "
-            "(action='clear_cache' / action='clear_user' with username=).\n"
-            "• 🌐 instagram_post — full details for ONE post by shortcode or URL: "
-            "location (name + GPS + Google Maps link), exact timestamp, caption, hashtags, "
-            "usertags, music. Input: shortcode like 'DXjuqH9nDVE' or full post URL.\n"
-            "• 🌐/🔐 instagram_hashtag — trending/top posts for any hashtag. "
-            "AUTO-MODE: 🌐 anon gives 12 posts (no likes); 🔐 auth gives up to 300 posts "
-            "(paginated, 30/page) with full likes + plays + comments + music + tagged users. "
-            "Auth also unlocks age-gated hashtags (#swimwear, #bikini, #fitness …). "
-            "Input: tag (without #), max_posts (default 30, max 300).\n"
-            "• 🔐 instagram_search — find accounts and hashtags by keyword. "
-            "context='blended' (users+hashtags, default), 'user' (accounts only), 'hashtag' (hashtags only). "
-            "Returns: username, full name, verified, follower count, mutual follow status, "
-            "and for hashtags: post count. Auth required — returns 401 without cookies.\n"
-            "• 🔐 instagram_followers_list — recent followers of an account (~50, no pagination for others). "
-            "Returns: username, verified, private, mutual follow status. "
-            "Note: Instagram limits this to ~50 for accounts other than your own.\n"
-            "• 🔐 instagram_following_list — accounts a user follows, with full pagination (50/page). "
-            "max_users param controls total (default 200, max 1000). "
-            "Extra: is_favorite (⭐) field. Full mutual-follow detection.\n"
-            "• 🔐 instagram_post_likers — users who liked a post (~98 returned, no pagination). "
-            "Shows total like count. Full friendship_status per liker (following, followed_by, muting, blocking). "
-            "Input: shortcode or full post URL.\n"
-            "• 🔐 instagram_tagged_by — posts BY OTHERS that tag this account (passive — "
-            "they mentioned us). Tagged Tab endpoint.\n"
-            "• 🔐 instagram_reposts — content this account ACTIVELY REPOSTED from others "
-            "(endorsements — we chose to amplify them). Reposts Tab endpoint.\n"
-            "• 🔐 instagram_reels — account's OWN reels with PLAY COUNTS. "
-            "play_count is NOT available via instagram_feed_deep — only this tool exposes it. "
-            "Use for reel performance analysis and virality ranking.\n"
-            "• 🌐 instagram_post_comments — comments on a single post with per-comment like counts, "
-            "author info, threading depth, GIF detection, and language flags. "
-            "Input: shortcode or URL. sort_order='popular' for most-liked first, 'recent' for chronological. "
-            "instagram_post returns comment COUNT only — use this tool for actual comment content.\n"
-            "• 🔐 instagram_stories — fetch currently active Stories for an account. "
-            "Returns per story: media type (image/video), timestamp, expiry, duration, music, "
-            "mention stickers, linked post sticker, accessibility caption, paid partnership flag. "
-            "Stories expire after 24h — cached 2 min. Use for real-time brand monitoring.\n\n"
-            "CONTENT-FROM-OTHERS DECISION GUIDE:\n"
-            "  Who appears in account's OWN posts?    → instagram_find_collab_network 🌐\n"
-            "  Who tagged the account in THEIR posts? → instagram_tagged_by 🔐\n"
-            "  What did the account REPOST from others? → instagram_reposts 🔐\n"
-            "  What's trending by hashtag?             → instagram_hashtag 🌐/🔐\n"
-            "  Find an account by name/keyword?        → instagram_search 🔐\n"
-            "  Discover related hashtags for a topic?  → instagram_search context='hashtag' 🔐\n\n"
-            "Results are cached — repeated lookups are instant."
-        ),
+        instructions="",  # filled in below after registration + audit
     )
 
     # ── 6. Tools ──────────────────────────────────────────────────────────────
+    # Register all tools (populates mcp._instagram_tool_inventory)
     register_tools(mcp, client, config, exporter)
 
-    # ── 7. Resources ──────────────────────────────────────────────────────────
+    # ── 7. Audit annotations against the destructive-tool registry ───────────
+    from .tools._audit import run_annotation_audit
+    run_annotation_audit(mcp._instagram_tool_inventory)
+
+    # ── 8. Build server instructions from the runtime inventory ──────────────
+    from .tools._instructions import build_server_instructions
+    _instructions_text = build_server_instructions(
+        mcp._instagram_tool_inventory, _auth_status
+    )
+
+    # Assign instructions back to FastMCP. The instructions kwarg accepted at
+    # construction is stored on mcp._mcp_server.instructions in mcp[cli]>=1.0.
+    # Mutate the underlying server attribute directly to avoid relying on a
+    # setter that may or may not exist depending on mcp[cli] version.
+    try:
+        mcp._mcp_server.instructions = _instructions_text  # type: ignore[attr-defined]
+    except AttributeError:
+        # Last-resort fallback: subclass-aware setter, if any future API exposes one
+        setattr(mcp, "instructions", _instructions_text)
+
+    # ── 9. Resources ──────────────────────────────────────────────────────────
     _register_resources(mcp, client, config)
 
-    # ── 8. Prompts ────────────────────────────────────────────────────────────
+    # ── 10. Prompts ───────────────────────────────────────────────────────────
     _register_prompts(mcp)
 
     return mcp
