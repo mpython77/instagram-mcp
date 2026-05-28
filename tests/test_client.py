@@ -29,6 +29,15 @@ def mock_config():
     config.cache_reels_ttl = 600
     config.cache_comments_ttl = 600
     config.async_max_clients = 50
+    # Path-shaped fields — must be real strings so the new ensure_path guard
+    # in AccountPool / MediaCache / JsonExporter / InstagramClient does not
+    # reject MagicMock attribute access at construction time.
+    config.accounts_dir = ""
+    config.media_cache_dir = ""
+    config.cookies_path = ""
+    config.export_dir = "exports"
+    config.delay_min_ms = 0
+    config.delay_max_ms = 0
     return config
 
 @pytest.fixture

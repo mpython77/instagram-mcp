@@ -146,7 +146,7 @@ def register_content(mcp, client, config, exporter) -> list[ToolDescriptor]:
                 raise _tool_error(
                     f"Post /{shortcode}/ could not be parsed — "
                     "it may be private, deleted, or temporarily unavailable.",
-                    "parse_error",
+                    "fetch_error",
                     "Verify the shortcode is correct and the post is publicly visible.",
                 )
 
@@ -935,7 +935,7 @@ def register_content(mcp, client, config, exporter) -> list[ToolDescriptor]:
             if not params.location_id and not params.location_name:
                 raise _tool_error(
                     "Provide either location_id (numeric) or location_name (search query).",
-                    "missing_param",
+                    "validation_error",
                     "Example: location_id='213385402' or location_name='Tashkent'",
                 )
 

@@ -104,7 +104,7 @@ def register_server(
                 rate_stats = client.rate_limiter.stats
                 return format_diagnostics_markdown(cache_stats, proxy_statuses, proxy_summary, rate_stats)
             except Exception as e:
-                raise _tool_error(f"Failed to collect diagnostics: {e}", "internal_error")
+                raise _tool_error(f"Failed to collect diagnostics: {e}", "unexpected_error")
 
         elif action == "clear_cache":
             try:
@@ -112,7 +112,7 @@ def register_server(
                 await ctx.info(f"Full cache flush: {count} entries removed")
                 return f"✅ All cache cleared ({count} entries removed). Next requests will fetch fresh data."
             except Exception as e:
-                raise _tool_error(f"Cache clear failed: {e}", "internal_error")
+                raise _tool_error(f"Cache clear failed: {e}", "unexpected_error")
 
         elif action == "clear_user":
             username_raw = (params.username or "").strip().lstrip("@").lower()
@@ -127,7 +127,7 @@ def register_server(
                 await ctx.info(f"Cache cleared for @{username_raw}: {count} entries removed")
                 return f"✅ Cache cleared for @{username_raw} ({count} entries removed)."
             except Exception as e:
-                raise _tool_error(f"Cache clear failed for @{username_raw}: {e}", "internal_error")
+                raise _tool_error(f"Cache clear failed for @{username_raw}: {e}", "unexpected_error")
 
         elif action == "reload_cookies":
             try:
@@ -145,7 +145,7 @@ def register_server(
                 else:
                     return "⚠️ Cookies reloaded but no valid sessionid found — check your cookies file."
             except Exception as e:
-                raise _tool_error(f"Cookie reload failed: {e}", "internal_error")
+                raise _tool_error(f"Cookie reload failed: {e}", "unexpected_error")
 
         else:
             raise _tool_error(

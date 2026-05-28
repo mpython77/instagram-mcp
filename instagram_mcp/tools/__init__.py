@@ -38,6 +38,28 @@ from ._helpers import (
     _exception_to_tool_error,
 )
 
+# ---------------------------------------------------------------------------
+# Backwards-compatibility re-exports
+# ---------------------------------------------------------------------------
+#
+# The legacy `instagram_mcp/tools.py` re-exported a handful of helpers that
+# tests and downstream callers may still import from `instagram_mcp.tools`.
+# Re-export them here so existing test modules keep working without
+# modification.
+from .automation import BatchScrapeInput  # noqa: F401  (re-export)
+from ..parser import (  # noqa: F401  (re-export)
+    parse_post_html,
+    parse_comments,
+    parse_feed_items,
+    parse_profile,
+    parse_reels_edges,
+    parse_repost_items,
+    parse_tagged_tab_edges,
+    shortcode_to_media_id,
+    check_dead_account,
+    check_dead_account_from_items,
+)
+
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
     from ..client import InstagramClient
@@ -165,4 +187,16 @@ __all__ = [
     "_exception_to_tool_error",
     "ToolDescriptor",
     "AuthTier",
+    # Backwards-compat re-exports (legacy tools.py surface)
+    "BatchScrapeInput",
+    "parse_post_html",
+    "parse_comments",
+    "parse_feed_items",
+    "parse_profile",
+    "parse_reels_edges",
+    "parse_repost_items",
+    "parse_tagged_tab_edges",
+    "shortcode_to_media_id",
+    "check_dead_account",
+    "check_dead_account_from_items",
 ]

@@ -287,7 +287,7 @@ def register_automation(mcp, client, config, exporter) -> list[ToolDescriptor]:
             try:
                 stats = await runner.run()
             except Exception as e:
-                raise _tool_error(f"Batch scrape failed: {e}", "batch_error", "Check logs or reduce max_workers.")
+                raise _tool_error(f"Batch scrape failed: {e}", "unexpected_error", "Check logs or reduce max_workers.")
 
         finally:
             try:
@@ -399,7 +399,7 @@ def register_automation(mcp, client, config, exporter) -> list[ToolDescriptor]:
         if scheduler is None:
             raise _tool_error(
                 "Scheduler not initialized.",
-                "config_error",
+                "validation_error",
                 "Restart the server — the scheduler should start automatically.",
             )
 
@@ -501,7 +501,7 @@ def register_automation(mcp, client, config, exporter) -> list[ToolDescriptor]:
         if monitor is None:
             raise _tool_error(
                 "Monitor service not initialized.",
-                "config_error",
+                "validation_error",
                 "Restart the server — the monitor should start automatically.",
             )
 

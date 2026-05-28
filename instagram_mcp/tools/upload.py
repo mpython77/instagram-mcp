@@ -319,7 +319,7 @@ def register_upload(
         if not media_pairs:
             raise _tool_error(
                 f"No downloadable media found in post {shortcode!r}",
-                "parse_error",
+                "fetch_error",
                 "Post may be private, or media URLs were not returned by Instagram.",
             )
 

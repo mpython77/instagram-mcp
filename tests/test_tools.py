@@ -297,7 +297,7 @@ async def test_instagram_reposts(tools, mock_client, mock_ctx):
 @pytest.mark.asyncio
 async def test_instagram_post(tools, mock_client, mock_ctx):
     mock_client.fetch_post.return_value = "<html>test</html>"
-    with patch("instagram_mcp.tools.parse_post_html") as mock_parse:
+    with patch("instagram_mcp.tools.content.parse_post_html") as mock_parse:
         info = PostInfo(
             shortcode="shortcode",
             username="author",

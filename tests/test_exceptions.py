@@ -16,7 +16,7 @@ from instagram_mcp.exceptions import (
 def test_instagram_mcp_error():
     err = InstagramMCPError("base error")
     assert str(err) == "base error"
-    assert err.error_type == "unknown_error"
+    assert err.error_type == "unexpected_error"
 
 def test_user_not_found_error():
     err1 = UserNotFoundError(username="testuser")

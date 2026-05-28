@@ -113,13 +113,16 @@ class TestJsonExporter:
         assert exp.export_dir == export_dir.resolve()
 
     def test_disabled_returns_none(self, disabled_exporter):
-        result = asyncio.get_event_loop().run_until_complete(
+        # Use asyncio.run() instead of get_event_loop() — the latter raises
+        # `RuntimeError: There is no current event loop in thread 'MainThread'`
+        # on Python 3.12 once any prior test has cleaned up its loop.
+        result = asyncio.run(
             disabled_exporter.save("profile", "nike", {"x": 1})
         )
         assert result is None
 
     def test_disabled_no_files_created(self, disabled_exporter, export_dir):
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             disabled_exporter.save("profile", "nike", {"x": 1})
         )
         assert not export_dir.exists() or not list(export_dir.rglob("*.json"))
