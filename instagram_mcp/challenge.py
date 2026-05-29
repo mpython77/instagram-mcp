@@ -92,7 +92,7 @@ class ChallengeResolver:
                     if p.suffix.lower() == ".json":
                         # Format as Cookie-Editor JSON array
                         cookie_list = []
-                        for c in session.cookies:
+                        for c in session.cookies.jar:
                             cookie_list.append({
                                 "name": c.name,
                                 "value": c.value,
@@ -105,7 +105,7 @@ class ChallengeResolver:
                     else:
                         # Simple cookies.txt format
                         lines = ["# Netscape HTTP Cookie File\n"]
-                        for c in session.cookies:
+                        for c in session.cookies.jar:
                             domain = c.domain or ".instagram.com"
                             include_sub = "TRUE" if domain.startswith(".") else "FALSE"
                             path = c.path or "/"
