@@ -1,0 +1,7 @@
+{
+  "task_id": "task-comprehensive-improvements",
+  "task_description": "Comprehensive improvements to instagram-mcp: remove mock imports from production code, split 6500-line client.py into a package, add shadow-ban detection, cookie health monitoring, fingerprint rotation, middleware pipeline, audience intelligence tools, enhanced monitoring events, CSV export, plugin system, and metrics/observability.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004", "FEAT-005", "FEAT-006"],
+  "blocked_reason": null
+}

@@ -27,7 +27,9 @@ Configuration (env vars):
 from __future__ import annotations
 
 import asyncio
+import csv
 import dataclasses
+import io
 import json
 import logging
 import re
@@ -38,7 +40,7 @@ from typing import Any, Dict, List, Optional
 
 from ._path_guard import ensure_path
 
-__all__ = ["JsonExporter"]
+__all__ = ["JsonExporter", "CsvExporter"]
 
 logger = logging.getLogger("instagram_mcp.exporter")
 
@@ -716,3 +718,121 @@ class JsonExporter:
         except Exception:
             tmp.unlink(missing_ok=True)
             raise
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CsvExporter
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CsvExporter:
+    """Export tool results as CSV files.
+
+    Provides CSV and Markdown export alongside the existing JsonExporter.
+    Handles nested dicts by flattening keys with dot notation, and handles
+    lists by writing one row per item.
+    """
+
+    def __init__(self, export_dir: str | Path = "exports", enabled: bool = True) -> None:
+        self._export_dir = Path(export_dir).expanduser().resolve()
+        self.enabled = bool(enabled)
+
+    @property
+    def export_dir(self) -> Path:
+        return self._export_dir
+
+    def _flatten_dict(self, d: dict, parent_key: str = "", sep: str = ".") -> dict:
+        """Flatten a nested dict using dot notation for keys."""
+        items: list = []
+        for k, v in d.items():
+            new_key = f"{parent_key}{sep}{k}" if parent_key else k
+            if isinstance(v, dict):
+                items.extend(self._flatten_dict(v, new_key, sep).items())
+            elif isinstance(v, list):
+                # Store lists as JSON strings in the cell
+                items.append((new_key, json.dumps(v, ensure_ascii=False)))
+            else:
+                items.append((new_key, v))
+        return dict(items)
+
+    def _make_csv_path(self, tool_name: str, subject: str) -> Path:
+        safe_tool = re.sub(r"[^a-z0-9_]", "_", tool_name.lower())
+        safe_subject = re.sub(r"[^a-zA-Z0-9_\-\+\.]", "_", subject)[:60]
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
+        return self._export_dir / safe_tool / f"{safe_subject}_{ts}.csv"
+
+    def export_csv(self, tool_name: str, subject: str, data: dict) -> Optional[Path]:
+        """Flatten data dict into CSV rows and write to file.
+
+        If data contains a list at the top level (or a key whose value is a list
+        of dicts), each list item becomes a row. Otherwise a single row is written
+        with flattened keys as columns.
+
+        Returns the file Path on success, None if disabled or on error.
+        """
+        if not self.enabled:
+            return None
+
+        try:
+            path = self._make_csv_path(tool_name, subject)
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Determine rows: if data has a list of dicts, use those as rows
+            rows: list[dict] = []
+            list_key = None
+            for k, v in data.items():
+                if isinstance(v, list) and v and isinstance(v[0], dict):
+                    list_key = k
+                    break
+
+            if list_key:
+                for item in data[list_key]:
+                    flat = self._flatten_dict(item)
+                    rows.append(flat)
+            else:
+                rows.append(self._flatten_dict(data))
+
+            if not rows:
+                return None
+
+            # Collect all fieldnames across all rows
+            fieldnames: list[str] = []
+            seen: set = set()
+            for row in rows:
+                for k in row:
+                    if k not in seen:
+                        fieldnames.append(k)
+                        seen.add(k)
+
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+                writer.writeheader()
+                writer.writerows(rows)
+
+            logger.debug("CsvExporter: saved %s/%s -> %s", tool_name, subject, path.name)
+            return path
+
+        except Exception as exc:
+            logger.warning("CsvExporter: export_csv failed [%s/%s]: %s", tool_name, subject, exc)
+            return None
+
+    def export_markdown(self, tool_name: str, subject: str, content: str) -> Optional[Path]:
+        """Save markdown content to file.
+
+        Returns the file Path on success, None if disabled or on error.
+        """
+        if not self.enabled:
+            return None
+
+        try:
+            safe_tool = re.sub(r"[^a-z0-9_]", "_", tool_name.lower())
+            safe_subject = re.sub(r"[^a-zA-Z0-9_\-\+\.]", "_", subject)[:60]
+            ts = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
+            path = self._export_dir / safe_tool / f"{safe_subject}_{ts}.md"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            logger.debug("CsvExporter: saved markdown %s/%s -> %s", tool_name, subject, path.name)
+            return path
+
+        except Exception as exc:
+            logger.warning("CsvExporter: export_markdown failed [%s/%s]: %s", tool_name, subject, exc)
+            return None

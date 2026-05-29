@@ -228,6 +228,26 @@ def create_mcp_server():
     # Register all tools (populates mcp._instagram_tool_inventory)
     register_tools(mcp, client, config, exporter)
 
+    # ── 6b. Plugins ───────────────────────────────────────────────────────────
+    from .plugins import PluginManager
+    plugin_manager = PluginManager()
+    plugin_registrars = plugin_manager.load_plugins()
+    plugin_tools = []
+    for registrar in plugin_registrars:
+        try:
+            descriptors = registrar(mcp, client, config, exporter) or []
+            plugin_tools.extend(descriptors)
+        except Exception as exc:
+            logger.warning("Plugin registrar failed: %s", exc)
+    if plugin_tools:
+        mcp._instagram_tool_inventory.extend(plugin_tools)
+        logger.info(
+            "Loaded %d tools from %d plugins",
+            len(plugin_tools),
+            len(plugin_registrars),
+        )
+    mcp._plugin_manager = plugin_manager
+
     # ── 7. Audit annotations against the destructive-tool registry ───────────
     from .tools._audit import run_annotation_audit
     run_annotation_audit(mcp._instagram_tool_inventory)

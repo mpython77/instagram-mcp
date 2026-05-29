@@ -1,0 +1,35 @@
+{
+  "id": "FEAT-003",
+  "type": "refactor",
+  "description": "Split client.py (6532 lines) into an instagram_mcp/client/ package with logical sub-modules. Maintain full backwards compatibility so 'from instagram_mcp.client import InstagramClient' still works.",
+  "status": "completed",
+  "steps": [
+    "Create directory instagram_mcp/client/",
+    "Create instagram_mcp/client/_base.py: Move the InstagramClient class definition, __init__, properties (config, cache, proxy_manager, rate_limiter, cookie_manager, account_pool, media_cache), close(), close_sessions(), _decode_cookie_value(), _cookie_str(). Keep all imports needed. The class will use mixin pattern: inherit from all sub-modules' mixin classes.",
+    "Create instagram_mcp/client/_retry.py: Move _with_proxy_retry() as a mixin class (RetryMixin) with that single method.",
+    "Create instagram_mcp/client/_sessions.py: Move _get_session(), _invalidate_session(), _get_auth_session() as SessionMixin class.",
+    "Create instagram_mcp/client/_profile.py: Move fetch_user(), fetch_bulk(), _fetch_profile_attempt() as ProfileMixin.",
+    "Create instagram_mcp/client/_feed.py: Move fetch_feed_items(), fetch_user_feed(), _fetch_feed_page_v1_attempt(), _fetch_graphql_attempt(), _fetch_single_feed_page() as FeedMixin.",
+    "Create instagram_mcp/client/_social.py: Move fetch_followers(), fetch_following(), fetch_search(), fetch_similar_accounts(), fetch_post_likers(), _friendships_get(), _parse_follow_user(), search_users(), get_user_followers(), get_user_following(), compare_followers(), user_id_lookup() as SocialMixin.",
+    "Create instagram_mcp/client/_interactions.py: Move like_post(), follow_user(), block_user(), unblock_user(), post_comment(), delete_comment(), comment_reply(), comment_like(), comment_hide(), post_delete(), toggle_comments(), media_insights(), post_save(), post_unsave(), account_privacy(), story_mark_seen(), story_reply(), edit_profile(), broadcast_channel_info(), broadcast_channel_posts() as InteractionsMixin.",
+    "Create instagram_mcp/client/_content.py: Move fetch_post(), _fetch_post_attempt(), fetch_comments(), _fetch_comments_attempt(), fetch_comments_paginated(), fetch_hashtag(), _fetch_hashtag_attempt(), _fetch_hashtag_sections_page(), fetch_post_bulk(), fetch_stories(), fetch_highlights(), fetch_tagged_posts(), fetch_tagged_posts_paginated(), fetch_reposts(), fetch_reposts_paginated(), fetch_reels(), fetch_reels_paginated(), fetch_media_info(), fetch_location_posts(), fetch_audio_reels(), home_feed(), saved_posts(), liked_posts(), activity_feed(), hashtag_suggest(), _fetch_hashtag_info(), caption_analyze() as ContentMixin.",
+    "Create instagram_mcp/client/_upload.py: Move upload_photo(), _upload_single_image(), _configure_single(), _configure_carousel(), publish_story(), _upload_video(), upload_reel(), _post_configure(), _prepare_image(), _jpeg_dimensions(), upload_video_feed() as UploadMixin.",
+    "Create instagram_mcp/client/_dm.py: Move fetch_dm_inbox(), fetch_dm_thread(), _fetch_fb_tokens(), resolve_dm_thread_igid(), send_dm_text(), send_dm_to_username(), _gql_mutation(), _gql_mutation_with_retry(), dm_react(), dm_unreact(), dm_unsend(), dm_mark_seen(), _auth_headers(), _auth_post(), _auth_get(), _require_auth(), dm_send_photo(), dm_send_video(), dm_mute(), dm_share_post(), dm_media_messages() as DmMixin.",
+    "Create instagram_mcp/client/_threads.py: Move _threads_headers(), threads_profile(), threads_user_posts() as ThreadsMixin.",
+    "Create instagram_mcp/client/__init__.py: Import InstagramClient and re-export it. Also re-export any module-level helper functions like _mask_proxy and _caption_insights that may be imported elsewhere. The import should be: 'from ._base import InstagramClient' (where _base assembles the final class from all mixins). Ensure 'from instagram_mcp.client import InstagramClient' works.",
+    "Remove the old instagram_mcp/client.py file.",
+    "Run tests to confirm all imports and functionality still work."
+  ],
+  "acceptance_criteria": [
+    "instagram_mcp/client.py no longer exists as a file (replaced by client/ package)",
+    "'from instagram_mcp.client import InstagramClient' still works",
+    "All existing tests pass unchanged",
+    "No circular imports"
+  ],
+  "verification": [
+    "python -c 'from instagram_mcp.client import InstagramClient; print(InstagramClient)'",
+    "pytest tests/ -v --tb=short --ignore=tests/test_upload.py --ignore=tests/test_new_tools.py --ignore=tests/test_final_push.py"
+  ],
+  "blocked_reason": null,
+  "findings": "Successfully split 6531-line client.py into 12 mixin files in instagram_mcp/client/ package. Key implementation notes: (1) Relative imports inside method bodies needed updating from single-dot to double-dot (e.g., from .models to from ..models) since methods are now one level deeper. (2) Test patching of instagram_mcp.client.JitterAsyncSession required a _get_jitter_session_cls() helper in _sessions.py that looks up the class from the package module at runtime. (3) CURL_CFFI_AVAILABLE check in __init__ uses sys.modules lookup to support test overriding at the package level. (4) _caption_insights function is duplicated in both _base.py (for backward-compat export) and _content.py (for actual usage in caption_analyze method). All 779 tests pass."
+}

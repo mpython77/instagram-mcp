@@ -67,6 +67,10 @@ class MonitorEntry:
         self.last_check: float = 0.0
         self.notifications_sent: int = 0
         self.consecutive_errors: int = 0
+        # Profile state tracking for event-based monitoring
+        self.last_followers: int = 0
+        self.last_bio: str = ""
+        self.last_is_private: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -78,6 +82,9 @@ class MonitorEntry:
             "last_check": _ts_str(int(self.last_check)) if self.last_check else "never",
             "notifications_sent": self.notifications_sent,
             "consecutive_errors": self.consecutive_errors,
+            "last_followers": self.last_followers,
+            "last_bio": self.last_bio,
+            "last_is_private": self.last_is_private,
         }
 
 
@@ -92,17 +99,21 @@ class AccountMonitor:
         fetch_fn: Callable[[str, int], Coroutine[Any, Any, List[Dict[str, Any]]]],
         http_post_fn: Optional[Callable[[str, Dict], Coroutine[Any, Any, None]]] = None,
         default_interval: int = 300,
+        profile_fetch_fn: Optional[Callable[[str], Coroutine[Any, Any, Optional[Dict[str, Any]]]]] = None,
     ) -> None:
         """
         Args:
-            fetch_fn: async (username, max_posts) → list of post dicts
+            fetch_fn: async (username, max_posts) -> list of post dicts
                       Each post must have: shortcode, taken_at, likes_count, caption
-            http_post_fn: async (url, payload) → None  — sends the webhook
+            http_post_fn: async (url, payload) -> None  -- sends the webhook
             default_interval: polling interval in seconds (default 5 min)
+            profile_fetch_fn: async (username) -> profile dict with keys:
+                              followers, biography, is_private. Optional.
         """
         self._fetch_fn = fetch_fn
         self._http_post_fn = http_post_fn or _default_http_post
         self._default_interval = default_interval
+        self._profile_fetch_fn = profile_fetch_fn
         self._entries: Dict[str, MonitorEntry] = {}
         self._task: Optional[asyncio.Task] = None
         self._total_checks: int = 0
@@ -224,34 +235,112 @@ class AccountMonitor:
             return
 
         entry.consecutive_errors = 0
-        if not posts:
-            return
 
-        latest = posts[0]
-        shortcode = latest.get("shortcode", "")
-        if not shortcode or shortcode == entry.last_post_shortcode:
-            return
+        # Check for new posts
+        if posts:
+            latest = posts[0]
+            shortcode = latest.get("shortcode", "")
+            if shortcode and shortcode != entry.last_post_shortcode:
+                entry.last_post_shortcode = shortcode
+                entry.notifications_sent += 1
+                self._total_notifications += 1
 
-        entry.last_post_shortcode = shortcode
-        entry.notifications_sent += 1
-        self._total_notifications += 1
+                payload: Dict[str, Any] = {
+                    "event": "new_post",
+                    "username": entry.username,
+                    "shortcode": shortcode,
+                    "post_url": f"https://www.instagram.com/p/{shortcode}/",
+                    "caption": (latest.get("caption") or "")[:500],
+                    "likes": latest.get("likes_count", 0),
+                    "timestamp": latest.get("taken_at", 0),
+                    "detected_at": int(time.time()),
+                }
 
-        payload: Dict[str, Any] = {
-            "event": "new_post",
-            "username": entry.username,
-            "shortcode": shortcode,
-            "post_url": f"https://www.instagram.com/p/{shortcode}/",
-            "caption": (latest.get("caption") or "")[:500],
-            "likes": latest.get("likes_count", 0),
-            "timestamp": latest.get("taken_at", 0),
-            "detected_at": int(time.time()),
-        }
+                try:
+                    await self._http_post_fn(entry.webhook_url, payload)
+                    logger.info("Webhook sent for @%s new post %s", entry.username, shortcode)
+                except Exception as exc:
+                    logger.warning("Webhook delivery failed for @%s: %s", entry.username, exc)
 
-        try:
-            await self._http_post_fn(entry.webhook_url, payload)
-            logger.info("Webhook sent for @%s new post %s", entry.username, shortcode)
-        except Exception as exc:
-            logger.warning("Webhook delivery failed for @%s: %s", entry.username, exc)
+        # Check profile-level events if profile_fetch_fn is available
+        if self._profile_fetch_fn is not None:
+            try:
+                profile_data = await self._profile_fetch_fn(entry.username)
+            except Exception as exc:
+                logger.debug("Monitor profile fetch failed for @%s: %s", entry.username, exc)
+                return
+
+            if profile_data is None:
+                return
+
+            current_followers = profile_data.get("followers", profile_data.get("follower_count", 0)) or 0
+            current_bio = profile_data.get("biography", profile_data.get("bio", "")) or ""
+            current_is_private = bool(profile_data.get("is_private", False))
+
+            events: List[Dict[str, Any]] = []
+
+            # Follower spike: >5% increase
+            if entry.last_followers > 0 and current_followers > entry.last_followers * 1.05:
+                events.append({
+                    "event": "follower_spike",
+                    "username": entry.username,
+                    "previous_followers": entry.last_followers,
+                    "current_followers": current_followers,
+                    "change_pct": round((current_followers - entry.last_followers) / entry.last_followers * 100, 1),
+                    "detected_at": int(time.time()),
+                })
+
+            # Follower drop: >5% decrease
+            if entry.last_followers > 0 and current_followers < entry.last_followers * 0.95:
+                events.append({
+                    "event": "follower_drop",
+                    "username": entry.username,
+                    "previous_followers": entry.last_followers,
+                    "current_followers": current_followers,
+                    "change_pct": round((current_followers - entry.last_followers) / entry.last_followers * 100, 1),
+                    "detected_at": int(time.time()),
+                })
+
+            # Bio change
+            if entry.last_bio and current_bio != entry.last_bio:
+                events.append({
+                    "event": "bio_change",
+                    "username": entry.username,
+                    "previous_bio": entry.last_bio,
+                    "current_bio": current_bio,
+                    "detected_at": int(time.time()),
+                })
+
+            # Went private
+            if not entry.last_is_private and current_is_private and entry.last_followers > 0:
+                events.append({
+                    "event": "went_private",
+                    "username": entry.username,
+                    "detected_at": int(time.time()),
+                })
+
+            # Went public
+            if entry.last_is_private and not current_is_private:
+                events.append({
+                    "event": "went_public",
+                    "username": entry.username,
+                    "detected_at": int(time.time()),
+                })
+
+            # Update stored state
+            entry.last_followers = current_followers
+            entry.last_bio = current_bio
+            entry.last_is_private = current_is_private
+
+            # Fire webhooks for detected events
+            for event_payload in events:
+                entry.notifications_sent += 1
+                self._total_notifications += 1
+                try:
+                    await self._http_post_fn(entry.webhook_url, event_payload)
+                    logger.info("Webhook sent for @%s event=%s", entry.username, event_payload["event"])
+                except Exception as exc:
+                    logger.warning("Webhook delivery failed for @%s event=%s: %s", entry.username, event_payload["event"], exc)
 
 
 async def _default_http_post(url: str, payload: Dict[str, Any]) -> None:

@@ -2152,3 +2152,69 @@ class SubmitVerificationCodeInput(BaseModel):
     alias: str = Field(default="default", description="The account alias under verification.")
 
 
+# ── Audience Intelligence Tools ───────────────────────────────────────────────
+
+class FakeFollowerCheckInput(BaseModel):
+    """Input for instagram_fake_follower_check tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    username: str = Field(..., description="Instagram username to analyze")
+    sample_size: int = Field(default=100, ge=10, le=500, description="Number of followers to sample")
+
+    @field_validator("username")
+    @classmethod
+    def clean_username(cls, v: str) -> str:
+        return _clean_username(v)
+
+
+class GrowthVelocityInput(BaseModel):
+    """Input for instagram_growth_velocity tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    username: str = Field(..., description="Instagram username to analyze")
+    days: int = Field(default=30, ge=7, le=180, description="Days of history to analyze")
+
+    @field_validator("username")
+    @classmethod
+    def clean_username(cls, v: str) -> str:
+        return _clean_username(v)
+
+
+class BestTimeToPostInput(BaseModel):
+    """Input for instagram_best_time_to_post tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    username: str = Field(..., description="Instagram username to analyze")
+    max_posts: int = Field(default=50, ge=10, le=200, description="Number of posts to analyze")
+
+    @field_validator("username")
+    @classmethod
+    def clean_username(cls, v: str) -> str:
+        return _clean_username(v)
+
+
+class MetricsInput(BaseModel):
+    """Input for instagram_metrics tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    action: str = Field(
+        default="get",
+        description=(
+            "Action to perform:\n"
+            "  'get'   - return current metrics\n"
+            "  'reset' - reset all metrics counters"
+        ),
+    )
+
+
+class PluginsInput(BaseModel):
+    """Input for instagram_plugins tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    action: str = Field(
+        default="list",
+        description="Action to perform: 'list' - list loaded plugins",
+    )
+
+
+

@@ -39,6 +39,7 @@ def mock_client():
     client.fetch_highlights = AsyncMock()
     client.fetch_location_posts = AsyncMock()
     client.fetch_audio_reels = AsyncMock()
+    client.cache_media_urls = AsyncMock(side_effect=lambda x: x)
     client.cache = MagicMock()
     client.cache.stats = AsyncMock()
     client.cache.clear = AsyncMock()

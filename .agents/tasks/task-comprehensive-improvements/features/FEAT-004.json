@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "Add Shadow-Ban Detection, Cookie Health Monitor, Fingerprint Rotation, and Request Pipeline Middleware - four defensive infrastructure features bundled together since they are all internal utilities that protect the scraping pipeline.",
+  "status": "completed",
+  "steps": [
+    "Create instagram_mcp/shadow_ban.py: Implement ShadowBanDetector class. Track per-proxy response patterns. If a proxy returns HTTP 200 but empty data (empty user, empty feed items) N times in a row (threshold configurable, default 3), quarantine that proxy via proxy_manager.mark_failed(). Log warning 'Shadow-ban suspected on proxy {masked_url}: {count} consecutive empty 200s'. Expose check_response(proxy_url, response_data) -> bool method that returns True if response appears shadow-banned. Expose stats() -> dict.",
+    "Create instagram_mcp/cookie_health.py: Implement CookieHealthMonitor class. Accept a CookieManager instance. Parse cookie expiry times from cookies (look for 'expires' or 'Expires' keys in cookie data). Provide check_health() -> dict method returning {healthy: bool, cookies_checked: int, expiring_soon: list[str], expired: list[str]}. 'expiring_soon' = expires within 24 hours. Provide needs_refresh() -> bool property. Log warnings when cookies are expiring.",
+    "Create instagram_mcp/fingerprint.py: Implement FingerprintRotator class. Maintain a list of Chrome impersonation versions (chrome120 through chrome142). Provide get_impersonate() -> str that randomly selects one. Provide get_headers() -> dict that returns randomized Accept-Language (from a pool of 5-6 common locales), a matching User-Agent string, and Sec-CH-UA viewport hints. The rotator should be deterministic per-session (same fingerprint for duration of a session) but rotate between sessions.",
+    "Create instagram_mcp/middleware.py: Implement a composable middleware pipeline. Define Middleware protocol/ABC with async def process(request_context: dict, next_fn) -> response pattern. Implement: FingerprintMiddleware (applies fingerprint rotation from fingerprint.py), TimingJitterMiddleware (applies delay from delay.py), ResponseValidationMiddleware (checks for login redirects, challenge pages), ShadowBanMiddleware (checks for empty 200s using shadow_ban.py). Implement MiddlewarePipeline class that chains middlewares and exposes async execute(context) -> response.",
+    "Add tests: tests/test_shadow_ban.py, tests/test_cookie_health.py, tests/test_fingerprint.py, tests/test_middleware.py. Each should have at least 3-4 meaningful test cases covering the core logic.",
+    "Run the full test suite to confirm no regressions."
+  ],
+  "acceptance_criteria": [
+    "instagram_mcp/shadow_ban.py exists with ShadowBanDetector class",
+    "instagram_mcp/cookie_health.py exists with CookieHealthMonitor class",
+    "instagram_mcp/fingerprint.py exists with FingerprintRotator class",
+    "instagram_mcp/middleware.py exists with Middleware protocol and pipeline",
+    "All new test files pass",
+    "All existing tests still pass"
+  ],
+  "verification": [
+    "pytest tests/test_shadow_ban.py tests/test_cookie_health.py tests/test_fingerprint.py tests/test_middleware.py -v",
+    "pytest tests/ -v --tb=short --ignore=tests/test_upload.py --ignore=tests/test_new_tools.py --ignore=tests/test_final_push.py"
+  ],
+  "blocked_reason": null,
+  "findings": "All 22 new tests pass. Full suite: 801 passed, 1 skipped, 0 failures. No regressions from the 780 baseline."
+}

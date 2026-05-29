@@ -48,6 +48,7 @@ from ._helpers import (
     _exception_to_tool_error,
     _paginate_feed,
     _tool_error,
+    record_tool_call,
     sanitize_username,
 )
 
@@ -207,6 +208,7 @@ def register_analysis(
             raise _exception_to_tool_error(e)
 
         elapsed = time.perf_counter() - _t0
+        record_tool_call("instagram_analyze_engagement", elapsed)
         await ctx.info(f"@{params.username} ✓ — {len(feed_tags.posts)} posts — {elapsed:.2f}s")
         await exporter.save("engagement", params.username, {
             "profile": profile,
@@ -306,6 +308,7 @@ def register_analysis(
             raise _exception_to_tool_error(e)
 
         elapsed = time.perf_counter() - _t0
+        record_tool_call("instagram_find_collab_network", elapsed)
         await ctx.info(f"@{params.username} ✓ — {len(feed_tags.posts)} posts — {elapsed:.2f}s")
         await exporter.save("collab_network", params.username, {
             "profile": profile,
