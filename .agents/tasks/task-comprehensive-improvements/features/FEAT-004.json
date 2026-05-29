@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "feat",
   "description": "Add Shadow-Ban Detection, Cookie Health Monitor, Fingerprint Rotation, and Request Pipeline Middleware - four defensive infrastructure features bundled together since they are all internal utilities that protect the scraping pipeline.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create instagram_mcp/shadow_ban.py: Implement ShadowBanDetector class. Track per-proxy response patterns. If a proxy returns HTTP 200 but empty data (empty user, empty feed items) N times in a row (threshold configurable, default 3), quarantine that proxy via proxy_manager.mark_failed(). Log warning 'Shadow-ban suspected on proxy {masked_url}: {count} consecutive empty 200s'. Expose check_response(proxy_url, response_data) -> bool method that returns True if response appears shadow-banned. Expose stats() -> dict.",
     "Create instagram_mcp/cookie_health.py: Implement CookieHealthMonitor class. Accept a CookieManager instance. Parse cookie expiry times from cookies (look for 'expires' or 'Expires' keys in cookie data). Provide check_health() -> dict method returning {healthy: bool, cookies_checked: int, expiring_soon: list[str], expired: list[str]}. 'expiring_soon' = expires within 24 hours. Provide needs_refresh() -> bool property. Log warnings when cookies are expiring.",
@@ -24,5 +24,5 @@
     "pytest tests/ -v --tb=short --ignore=tests/test_upload.py --ignore=tests/test_new_tools.py --ignore=tests/test_final_push.py"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 22 new tests pass. Full suite: 801 passed, 1 skipped, 0 failures. No regressions from the 780 baseline."
 }
