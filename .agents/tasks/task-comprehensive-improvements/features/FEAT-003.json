@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "refactor",
   "description": "Split client.py (6532 lines) into an instagram_mcp/client/ package with logical sub-modules. Maintain full backwards compatibility so 'from instagram_mcp.client import InstagramClient' still works.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "Create directory instagram_mcp/client/",
     "Create instagram_mcp/client/_base.py: Move the InstagramClient class definition, __init__, properties (config, cache, proxy_manager, rate_limiter, cookie_manager, account_pool, media_cache), close(), close_sessions(), _decode_cookie_value(), _cookie_str(). Keep all imports needed. The class will use mixin pattern: inherit from all sub-modules' mixin classes.",
