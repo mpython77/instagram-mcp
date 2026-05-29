@@ -2193,3 +2193,28 @@ class BestTimeToPostInput(BaseModel):
         return _clean_username(v)
 
 
+class MetricsInput(BaseModel):
+    """Input for instagram_metrics tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    action: str = Field(
+        default="get",
+        description=(
+            "Action to perform:\n"
+            "  'get'   - return current metrics\n"
+            "  'reset' - reset all metrics counters"
+        ),
+    )
+
+
+class PluginsInput(BaseModel):
+    """Input for instagram_plugins tool."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    action: str = Field(
+        default="list",
+        description="Action to perform: 'list' - list loaded plugins",
+    )
+
+
+

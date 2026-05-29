@@ -2,7 +2,7 @@
   "id": "FEAT-006",
   "type": "feat",
   "description": "Add Plugin System and Metrics/Observability. These are infrastructure features that allow third-party extensions and operational visibility.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "Create instagram_mcp/plugins.py: Implement PluginManager class. Use importlib.metadata entry_points (group='instagram_mcp.tools') to discover third-party tool registrars. Provide load_plugins() method that finds all entry points, imports them, and returns a list of registrar callables. Each plugin entry point should be a function matching the register_<name>(mcp, client, config, exporter) -> list[ToolDescriptor] signature. Provide list_plugins() -> list[dict] that returns info about loaded plugins. Handle import errors gracefully with logging.",
     "Create instagram_mcp/metrics.py: Implement MetricsCollector class. Track: request_count (per tool name), request_duration_seconds (histogram-like: min/max/avg/p95 per tool), error_count (per tool, per error_type), cache_hit_count, cache_miss_count. Use simple in-memory counters (no external dependencies). Provide record_request(tool_name, duration_s, error=None) method. Provide get_metrics() -> dict method returning all collected metrics. Provide reset() method. Add a context manager/decorator pattern for easy instrumentation: @metrics.track('tool_name').",

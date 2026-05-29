@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from mcp.server.fastmcp import Context
 
 from ..formatter import format_diagnostics_markdown
-from ..models import ServerInput
+from ..models import ServerInput, MetricsInput, PluginsInput
 from ._helpers import (
     ToolDescriptor,
     _tool_error,
@@ -162,6 +162,160 @@ def register_server(
             annotations=_SERVER_ANNOTATIONS,
             input_model=ServerInput,
             description_first_line="🌐 NO LOGIN REQUIRED — server management, no Instagram session needed.",
+        )
+    )
+
+    # ── instagram_metrics ─────────────────────────────────────────────────────
+
+    _METRICS_ANNOTATIONS: dict = {
+        "title": "Instagram MCP Metrics",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+
+    @mcp.tool(name="instagram_metrics", annotations=_METRICS_ANNOTATIONS)
+    async def instagram_metrics(params: MetricsInput, ctx: Context) -> str:
+        """
+        🌐 NO LOGIN REQUIRED — view or reset server metrics.
+
+        Returns request counts, durations, error rates, and cache stats
+        for all tools that have been called since server start.
+
+        Actions:
+        - 'get' (default) — return current metrics as formatted markdown
+        - 'reset' — reset all metrics counters
+        """
+        from ..metrics import MetricsCollector
+
+        collector = MetricsCollector.get_instance()
+        action = (params.action or "get").strip().lower()
+
+        if action == "get":
+            metrics = collector.get_metrics()
+            lines = [
+                "# Instagram MCP Metrics",
+                "",
+                f"**Uptime:** {metrics['uptime_seconds']}s",
+                f"**Total requests:** {metrics['total_requests']}",
+                f"**Total errors:** {metrics['total_errors']}",
+                f"**Error rate:** {metrics['error_rate']}",
+                "",
+                "## Cache",
+                f"- Hits: {metrics['cache']['hits']}",
+                f"- Misses: {metrics['cache']['misses']}",
+                f"- Hit rate: {metrics['cache']['hit_rate']}",
+                "",
+            ]
+            if metrics["tools"]:
+                lines.append("## Per-tool metrics")
+                lines.append("")
+                lines.append("| Tool | Count | Avg (s) | P95 (s) | Errors |")
+                lines.append("|------|-------|---------|---------|--------|")
+                for name, data in metrics["tools"].items():
+                    err_count = sum(data["errors"].values()) if data["errors"] else 0
+                    lines.append(
+                        f"| {name} | {data['count']} | "
+                        f"{data['avg_duration_s']} | "
+                        f"{data['p95_duration_s']} | {err_count} |"
+                    )
+            else:
+                lines.append("_No tool calls recorded yet._")
+            return "\n".join(lines)
+
+        elif action == "reset":
+            collector.reset()
+            return "Metrics reset successfully."
+
+        else:
+            raise _tool_error(
+                f"Unknown action: '{params.action}'. Valid actions: 'get', 'reset'.",
+                "validation_error",
+                "Set action to 'get' or 'reset'.",
+            )
+
+    descriptors.append(
+        ToolDescriptor(
+            name="instagram_metrics",
+            toolset=TOOLSET_NAME,
+            auth_tier="anon",
+            annotations=_METRICS_ANNOTATIONS,
+            input_model=MetricsInput,
+            description_first_line="🌐 NO LOGIN REQUIRED — view or reset server metrics.",
+        )
+    )
+
+    # ── instagram_plugins ─────────────────────────────────────────────────────
+
+    _PLUGINS_ANNOTATIONS: dict = {
+        "title": "Instagram MCP Plugins",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+
+    @mcp.tool(name="instagram_plugins", annotations=_PLUGINS_ANNOTATIONS)
+    async def instagram_plugins(params: PluginsInput, ctx: Context) -> str:
+        """
+        🌐 NO LOGIN REQUIRED — list loaded plugins.
+
+        Shows all third-party plugins discovered and loaded via entry_points
+        (group: instagram_mcp.tools).
+
+        Actions:
+        - 'list' (default) — list all loaded plugins with status
+        """
+        action = (params.action or "list").strip().lower()
+
+        if action == "list":
+            plugin_mgr = getattr(mcp, "_plugin_manager", None)
+            if plugin_mgr is None:
+                return "Plugin system not initialized."
+
+            plugins = plugin_mgr.list_plugins()
+            if not plugins:
+                lines = [
+                    "# Instagram MCP Plugins",
+                    "",
+                    "_No plugins installed._",
+                    "",
+                    "To create a plugin, publish a package with an entry point in the "
+                    "`instagram_mcp.tools` group.",
+                ]
+            else:
+                lines = [
+                    "# Instagram MCP Plugins",
+                    "",
+                    f"**Loaded:** {sum(1 for p in plugins if p['status'] == 'loaded')}",
+                    f"**Errors:** {sum(1 for p in plugins if p['status'] == 'error')}",
+                    "",
+                    "| Plugin | Module | Status | Error |",
+                    "|--------|--------|--------|-------|",
+                ]
+                for p in plugins:
+                    lines.append(
+                        f"| {p['name']} | {p['module']} | "
+                        f"{p['status']} | {p.get('error') or '-'} |"
+                    )
+            return "\n".join(lines)
+
+        else:
+            raise _tool_error(
+                f"Unknown action: '{params.action}'. Valid actions: 'list'.",
+                "validation_error",
+                "Set action to 'list'.",
+            )
+
+    descriptors.append(
+        ToolDescriptor(
+            name="instagram_plugins",
+            toolset=TOOLSET_NAME,
+            auth_tier="anon",
+            annotations=_PLUGINS_ANNOTATIONS,
+            input_model=PluginsInput,
+            description_first_line="🌐 NO LOGIN REQUIRED — list loaded plugins.",
         )
     )
 
