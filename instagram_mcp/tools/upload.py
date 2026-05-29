@@ -127,7 +127,6 @@ def register_upload(
 
         elapsed = time.perf_counter() - _t0
         shortcode = result.get("shortcode", "")
-        post_url  = result.get("url", "")
 
         await ctx.report_progress(1.0, 1.0, message="Published!")
         await ctx.info(
@@ -195,7 +194,6 @@ def register_upload(
             raise _exception_to_tool_error(e)
 
         await ctx.report_progress(1.0, 1.0, message="Reel published!")
-        shortcode = result.get("shortcode", "")
         url = result.get("url", "")
         media_id = result.get("media_id", "")
         lines = ["**Reel published successfully!**"]
@@ -249,7 +247,6 @@ def register_upload(
             Markdown summary with file paths, sizes, and media info.
         """
         import os
-        import mimetypes
         from curl_cffi.requests import AsyncSession as _CurlSession
 
         _t0 = time.perf_counter()

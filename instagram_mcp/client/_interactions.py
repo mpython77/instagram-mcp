@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
-import uuid
 from typing import Any, Dict, List, Optional
 
 import json as _json
@@ -43,7 +41,7 @@ class InteractionsMixin:
             allow_redirects=False,
         )
         if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError(f"like_post: redirected (session rate-limited or expired)")
+            raise FetchError("like_post: redirected (session rate-limited or expired)")
         if resp.status_code not in (200, 201):
             raise FetchError(f"like_post: HTTP {resp.status_code}: {resp.text[:200]}")
         body_text = resp.text
@@ -83,7 +81,7 @@ class InteractionsMixin:
             allow_redirects=False,
         )
         if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError(f"follow_user: redirected (session rate-limited or expired)")
+            raise FetchError("follow_user: redirected (session rate-limited or expired)")
         if resp.status_code not in (200, 201):
             raise FetchError(f"follow_user: HTTP {resp.status_code}: {resp.text[:200]}")
         body_text = resp.text
@@ -127,7 +125,7 @@ class InteractionsMixin:
             allow_redirects=False,
         )
         if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError(f"block_user: redirected to login (session rate-limited)")
+            raise FetchError("block_user: redirected to login (session rate-limited)")
         if resp.status_code not in (200, 201):
             raise FetchError(f"block_user: HTTP {resp.status_code}: {resp.text[:200]}")
         body_text = resp.text
@@ -165,7 +163,7 @@ class InteractionsMixin:
             allow_redirects=False,
         )
         if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError(f"unblock_user: redirected to login (session rate-limited)")
+            raise FetchError("unblock_user: redirected to login (session rate-limited)")
         if resp.status_code not in (200, 201):
             raise FetchError(f"unblock_user: HTTP {resp.status_code}: {resp.text[:200]}")
         body_text = resp.text
@@ -313,7 +311,7 @@ class InteractionsMixin:
         if resp.status_code not in (200, 201):
             raise FetchError(f"comment_reply: HTTP {resp.status_code}: {body_text[:200]}")
         if body_text.lstrip().startswith("<"):
-            raise FetchError(f"comment_reply: got HTML (session blocked)")
+            raise FetchError("comment_reply: got HTML (session blocked)")
         try:
             body = _json.loads(body_text)
         except Exception:
@@ -362,7 +360,7 @@ class InteractionsMixin:
         if resp.status_code not in (200, 201):
             raise FetchError(f"comment_like: HTTP {resp.status_code}: {body_text[:200]}")
         if body_text.lstrip().startswith("<"):
-            raise FetchError(f"comment_like: got HTML (session blocked)")
+            raise FetchError("comment_like: got HTML (session blocked)")
         try:
             body = _json.loads(body_text)
         except Exception:
@@ -401,7 +399,7 @@ class InteractionsMixin:
         if resp.status_code not in (200, 201):
             raise FetchError(f"comment_hide: HTTP {resp.status_code}: {body_text[:200]}")
         if body_text.lstrip().startswith("<"):
-            raise FetchError(f"comment_hide: got HTML (session blocked)")
+            raise FetchError("comment_hide: got HTML (session blocked)")
         try:
             body = _json.loads(body_text)
         except Exception:
@@ -416,15 +414,12 @@ class InteractionsMixin:
     async def post_delete(self, media_id: str) -> Dict[str, Any]:
         """Permanently delete one of your own Instagram posts."""
         _, session, csrf = await self._require_auth("post_delete")
-        # Fetch media info to determine media_type
-        media_type = "1"
+        # Probe media info before deletion (best-effort; result is not required).
         try:
-            info_body = await self._auth_get(
+            await self._auth_get(
                 f"https://www.instagram.com/api/v1/media/{media_id}/info/",
                 {}, csrf, session, "post_delete_info",
             )
-            items = (info_body.get("items") or [{}])
-            media_type = str((items[0] if items else {}).get("media_type", 1))
         except Exception:
             pass
 
@@ -467,7 +462,7 @@ class InteractionsMixin:
         if resp.status_code not in (200, 201):
             raise FetchError(f"toggle_comments: HTTP {resp.status_code}: {body_text[:200]}")
         if body_text.lstrip().startswith("<"):
-            raise FetchError(f"toggle_comments: got HTML (session blocked)")
+            raise FetchError("toggle_comments: got HTML (session blocked)")
         try:
             body = _json.loads(body_text)
         except Exception:
@@ -500,7 +495,7 @@ class InteractionsMixin:
         if resp.status_code not in (200, 201):
             raise FetchError(f"media_insights: HTTP {resp.status_code}: {body_text[:200]}")
         if body_text.lstrip().startswith("<"):
-            raise FetchError(f"media_insights: got HTML (session blocked)")
+            raise FetchError("media_insights: got HTML (session blocked)")
         try:
             body = _json.loads(body_text)
         except Exception:
@@ -547,7 +542,7 @@ class InteractionsMixin:
             allow_redirects=False,
         )
         if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError(f"post_save: redirected to login (session rate-limited)")
+            raise FetchError("post_save: redirected to login (session rate-limited)")
         if resp.status_code not in (200, 201):
             raise FetchError(f"post_save: HTTP {resp.status_code}: {resp.text[:200]}")
         body = resp.text
@@ -576,7 +571,7 @@ class InteractionsMixin:
             allow_redirects=False,
         )
         if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError(f"post_unsave: redirected to login (session rate-limited)")
+            raise FetchError("post_unsave: redirected to login (session rate-limited)")
         if resp.status_code not in (200, 201):
             raise FetchError(f"post_unsave: HTTP {resp.status_code}: {resp.text[:200]}")
         body = resp.text
@@ -616,7 +611,7 @@ class InteractionsMixin:
         if resp.status_code not in (200, 201):
             raise FetchError(f"account_privacy: HTTP {resp.status_code}: {body_text[:200]}")
         if body_text.lstrip().startswith("<"):
-            raise FetchError(f"account_privacy: got HTML (session blocked)")
+            raise FetchError("account_privacy: got HTML (session blocked)")
         try:
             body = _json.loads(body_text)
         except Exception:
@@ -733,7 +728,7 @@ class InteractionsMixin:
             if resp.status_code in (200, 201) and not resp.text.lstrip().startswith("<"):
                 break
         if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError(f"edit_profile: redirected to login (session rate-limited)")
+            raise FetchError("edit_profile: redirected to login (session rate-limited)")
         if resp.status_code not in (200, 201):
             raise FetchError(f"edit_profile: HTTP {resp.status_code}: {resp.text[:200]}")
         body_text = resp.text

@@ -29,7 +29,6 @@ from __future__ import annotations
 import asyncio
 import csv
 import dataclasses
-import io
 import json
 import logging
 import re

@@ -393,7 +393,6 @@ def register_automation(mcp, client, config, exporter) -> list[ToolDescriptor]:
             params: action, images, caption, publish_at, post_id
         """
         from ..scheduler import PostScheduler
-        import os as _os
 
         scheduler: PostScheduler = getattr(mcp, "_post_scheduler", None)  # type: ignore[attr-defined]
         if scheduler is None:

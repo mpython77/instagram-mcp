@@ -24,11 +24,10 @@ Webhook payload (HTTP POST, JSON):
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Set
+from typing import Any, Callable, Coroutine, Dict, List, Optional
 
 logger = logging.getLogger("instagram_mcp.monitor")
 

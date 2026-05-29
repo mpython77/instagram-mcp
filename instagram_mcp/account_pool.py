@@ -1,4 +1,3 @@
-import os
 import time
 import logging
 import asyncio
@@ -39,7 +38,7 @@ class AccountPool:
                 # Skip temp/standard files if they are in the directory
                 if alias in ("cookies", "cookie"):
                     continue
-                    
+
                 cm = CookieManager(str(path))
                 if cm.load():
                     self.accounts[alias] = cm
@@ -61,7 +60,7 @@ class AccountPool:
 
             active_members: List[str] = []
             now = time.time()
-            
+
             for alias in list(self.accounts.keys()):
                 # Recover rate-limited accounts if cooldown has passed
                 if self.statuses[alias] == "rate_limited":
@@ -69,7 +68,7 @@ class AccountPool:
                     if now >= cooldown_until:
                         self.statuses[alias] = "active"
                         logger.info("Account '%s' recovered from rate-limiting cooldown", alias)
-                        
+
                 if self.statuses[alias] == "active":
                     active_members.append(alias)
 

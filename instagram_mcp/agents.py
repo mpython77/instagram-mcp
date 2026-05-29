@@ -31,7 +31,7 @@ import math
 import time
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple, Union
+from typing import Callable, Coroutine, Dict, List, Optional, Tuple, Union
 
 from .client import InstagramClient
 from .config import MCPConfig
@@ -327,7 +327,7 @@ class InfluencerVettingAgent(_BaseAgent):
             sponsor_set: set = set()
             coauthor_set: set = set()
 
-            for post in (posts if posts else feed_tags.posts):
+            for post in (posts if posts else (result.feed_tags.posts if result.feed_tags else [])):
                 for u in post.usertags:
                     usertag_counter[u] += 1
                 for m in post.mentions:

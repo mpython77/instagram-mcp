@@ -59,7 +59,7 @@ class JitterAsyncSession(CurlAsyncSession):
             if "challenge" in loc or "login" in loc:
                 if self.account_pool and self.account_alias != "default":
                     self.account_pool.mark_checkpoint(self.account_alias)
-                
+
                 from .challenge import ChallengeResolver
                 from .exceptions import FetchError
                 inst = ChallengeResolver.register_challenge(
@@ -80,7 +80,7 @@ class JitterAsyncSession(CurlAsyncSession):
                     if "checkpoint_required" in message or "checkpoint" in message or "challenge" in message:
                         if self.account_pool and self.account_alias != "default":
                             self.account_pool.mark_checkpoint(self.account_alias)
-                        
+
                         from .challenge import ChallengeResolver
                         from .exceptions import FetchError
                         inst = ChallengeResolver.register_challenge(

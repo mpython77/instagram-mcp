@@ -220,10 +220,6 @@ def register_profile(
             else:
                 _since = params.resolved_since()
                 _until = params.resolved_until()
-                date_range = (
-                    DateRange(since=_since, until=_until)
-                    if (_since or _until) else None
-                )
 
                 feed_tags_result = FeedTagResult()
                 if not profile.is_private:
