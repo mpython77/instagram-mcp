@@ -76,9 +76,10 @@ class AccountPool:
                 logger.warning("No healthy active accounts available in the pool!")
                 return None
 
-            # Round-robin selection
-            self._index = (self._index + 1) % len(active_members)
-            selected = active_members[self._index]
+            # Round-robin selection: index first, then advance, so the first
+            # call returns active_members[0] and rotation stays stable.
+            selected = active_members[self._index % len(active_members)]
+            self._index += 1
             return selected, self.accounts[selected]
 
     def mark_rate_limited(self, alias: str, cooldown_seconds: int = 900) -> None:

@@ -303,6 +303,9 @@ class InfluencerVettingAgent(_BaseAgent):
         # ── Step 2: Engagement (paginated) ────────────────────────────────────
         await self._emit(progress_cb, 2, 4, f"Analysing engagement ({max_posts} posts)...")
         posts: list = []
+        # Pre-initialise so Step 4 (score/verdict) never hits UnboundLocalError
+        # when the engagement step below raises and is swallowed.
+        is_dead, last_post_days = False, 0
         try:
             items, effective_max = await self._paginate(profile, max_posts, max_age_days)
             is_dead, last_post_days = check_dead_account_from_items(items, profile.posts_count)
