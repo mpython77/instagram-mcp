@@ -57,13 +57,16 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 DESTRUCTIVE_TOOLS: frozenset[str] = frozenset({
-    # Direct messages — every send/react/unsend/mark-seen mutates Instagram state.
+    # Direct messages — every send/react/unsend/mark-seen/mute/share mutates
+    # Instagram state. (instagram_dm_media_messages is read-only and omitted.)
     "instagram_dm_send",
     "instagram_dm_send_photo",
     "instagram_dm_send_video",
     "instagram_dm_react",
     "instagram_dm_unsend",
     "instagram_dm_mark_seen",
+    "instagram_dm_mute",
+    "instagram_dm_share_post",
     # Engagement actions.
     "instagram_post_like",
     "instagram_post_save",

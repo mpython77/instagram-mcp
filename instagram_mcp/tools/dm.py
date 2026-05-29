@@ -1,23 +1,26 @@
 """DM toolset — Instagram Direct messages.
 
-All eight tools registered here are 🔐 auth-required; the registrar therefore
+All eleven tools registered here are 🔐 auth-required; the registrar therefore
 short-circuits to an empty inventory when ``MCPConfig.hide_auth_when_no_cookies``
-is set and ``client.cookie_manager.is_authenticated`` is ``False``. Bodies are
-ported verbatim from the legacy ``instagram_mcp/tools.py`` (lines 3516-3713 and
-4643-4722); only annotation hints are tightened so each destructive write tool
-declares ``readOnlyHint=False, destructiveHint=True, idempotentHint=False`` to
-satisfy :func:`instagram_mcp.tools._audit.run_annotation_audit`.
+is set and ``client.cookie_manager.is_authenticated`` is ``False``. Each
+destructive write tool declares ``readOnlyHint=False, destructiveHint=True,
+idempotentHint=False`` to satisfy
+:func:`instagram_mcp.tools._audit.run_annotation_audit` (and is listed in
+``_audit.DESTRUCTIVE_TOOLS``); read-only tools declare the inverse.
 
 Tools registered:
 
-* ``instagram_dm_inbox``       (read-only)
-* ``instagram_dm_thread``      (read-only)
-* ``instagram_dm_send``        (destructive)
-* ``instagram_dm_send_photo``  (destructive)
-* ``instagram_dm_send_video``  (destructive)
-* ``instagram_dm_react``       (destructive)
-* ``instagram_dm_unsend``      (destructive)
-* ``instagram_dm_mark_seen``   (destructive)
+* ``instagram_dm_inbox``          (read-only)
+* ``instagram_dm_thread``         (read-only)
+* ``instagram_dm_send``           (destructive)
+* ``instagram_dm_send_photo``     (destructive)
+* ``instagram_dm_send_video``     (destructive)
+* ``instagram_dm_react``          (destructive)
+* ``instagram_dm_unsend``         (destructive)
+* ``instagram_dm_mark_seen``      (destructive)
+* ``instagram_dm_mute``           (destructive)
+* ``instagram_dm_share_post``     (destructive)
+* ``instagram_dm_media_messages`` (read-only)
 
 Validates: Requirements 1.2, 2.1, 2.2, 2.3, 2.4, 2.5, 4.5, 4.6, 5.1, 5.2, 5.3,
 8.1, 8.3, 17.2.
@@ -38,10 +41,13 @@ from ..formatter import (
 from ..models import (
     DMInboxInput,
     DMMarkSeenInput,
+    DMMediaMessagesInput,
+    DMMuteInput,
     DMReactInput,
     DMSendInput,
     DMSendPhotoInput,
     DMSendVideoInput,
+    DMSharePostInput,
     DMThreadInput,
     DMUnsendInput,
 )
@@ -419,6 +425,145 @@ def register_dm(
             annotations=mark_seen_annotations,
             input_model=DMMarkSeenInput,
             description_first_line=_first_doc_line(instagram_dm_mark_seen),
+        )
+    )
+
+    # ─────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_dm_mute  (destructive)
+    # ─────────────────────────────────────────────────────────────────────
+    mute_annotations = {"title": "Instagram DM Mute", **_DESTRUCTIVE_ANNOTATIONS}
+
+    @mcp.tool(name="instagram_dm_mute", annotations=mute_annotations)
+    async def instagram_dm_mute(params: DMMuteInput, ctx: Context) -> str:
+        """🔐 AUTH REQUIRED — Mute or unmute a DM thread.
+
+        Args:
+            params: thread_id, mute (True to mute, False to unmute; default True)
+        """
+        await ctx.info(
+            f"instagram_dm_mute: thread={params.thread_id} mute={params.mute}"
+        )
+        try:
+            data = await client.dm_mute(params.thread_id, params.mute)
+            return f"✅ Thread {data['status']}: {data['thread_id']}"
+        except Exception as e:
+            raise _exception_to_tool_error(e)
+
+    descriptors.append(
+        ToolDescriptor(
+            name="instagram_dm_mute",
+            toolset=TOOLSET_NAME,
+            auth_tier="auth",
+            annotations=mute_annotations,
+            input_model=DMMuteInput,
+            description_first_line=_first_doc_line(instagram_dm_mute),
+        )
+    )
+
+    # ─────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_dm_share_post  (destructive)
+    # ─────────────────────────────────────────────────────────────────────
+    share_post_annotations = {
+        "title": "Instagram DM Share Post",
+        **_DESTRUCTIVE_ANNOTATIONS,
+    }
+
+    @mcp.tool(name="instagram_dm_share_post", annotations=share_post_annotations)
+    async def instagram_dm_share_post(params: DMSharePostInput, ctx: Context) -> str:
+        """🔐 AUTH REQUIRED — Share an Instagram post into a DM thread or to a user.
+
+        Provide either thread_id or username (username resolves the thread
+        automatically). Optionally attach a text message with the share.
+
+        Args:
+            params: media_id, thread_id OR username, optional text
+        """
+        target = params.username or params.thread_id
+        await ctx.info(
+            f"instagram_dm_share_post: media={params.media_id} target={target}"
+        )
+        if not params.username and not params.thread_id:
+            raise _tool_error("Provide either username or thread_id", "validation_error")
+        try:
+            data = await client.dm_share_post(
+                media_id=params.media_id,
+                thread_id=params.thread_id,
+                username=params.username,
+                text=params.text,
+            )
+            return (
+                f"✅ Post {data['media_id']} shared to thread {data['thread_id']}"
+                f" (item {data.get('item_id', '')})"
+            )
+        except Exception as e:
+            raise _exception_to_tool_error(e)
+
+    descriptors.append(
+        ToolDescriptor(
+            name="instagram_dm_share_post",
+            toolset=TOOLSET_NAME,
+            auth_tier="auth",
+            annotations=share_post_annotations,
+            input_model=DMSharePostInput,
+            description_first_line=_first_doc_line(instagram_dm_share_post),
+        )
+    )
+
+    # ─────────────────────────────────────────────────────────────────────
+    # TOOL: instagram_dm_media_messages  (read-only)
+    # ─────────────────────────────────────────────────────────────────────
+    media_messages_annotations = {
+        "title": "Instagram DM Media Messages",
+        **_READ_ONLY_ANNOTATIONS,
+    }
+
+    @mcp.tool(
+        name="instagram_dm_media_messages", annotations=media_messages_annotations
+    )
+    async def instagram_dm_media_messages(
+        params: DMMediaMessagesInput, ctx: Context
+    ) -> str:
+        """🔐 AUTH REQUIRED — List media messages (photos, videos, shared posts) in a DM thread.
+
+        Scans up to ``limit`` recent messages in the thread and returns only
+        those carrying media (photos, videos, reels, shared posts, voice notes).
+
+        Args:
+            params: thread_id, limit (1-200, default 50)
+        """
+        await ctx.info(
+            f"instagram_dm_media_messages: thread={params.thread_id} "
+            f"limit={params.limit}"
+        )
+        try:
+            items = await client.dm_media_messages(params.thread_id, params.limit)
+            if not items:
+                return (
+                    "# 📎 DM Media Messages\n\n"
+                    f"No media messages found in thread `{params.thread_id}`."
+                )
+            lines = [
+                "# 📎 DM Media Messages",
+                "",
+                f"Thread `{params.thread_id}` — {len(items)} media message(s):",
+                "",
+            ]
+            for i, m in enumerate(items, 1):
+                lines.append(
+                    f"{i}. **{m.get('type', 'media')}** — item `{m.get('item_id', '')}`"
+                )
+            return "\n".join(lines)
+        except Exception as e:
+            raise _exception_to_tool_error(e)
+
+    descriptors.append(
+        ToolDescriptor(
+            name="instagram_dm_media_messages",
+            toolset=TOOLSET_NAME,
+            auth_tier="auth",
+            annotations=media_messages_annotations,
+            input_model=DMMediaMessagesInput,
+            description_first_line=_first_doc_line(instagram_dm_media_messages),
         )
     )
 

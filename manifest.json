@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "instagram-mcp",
   "version": "2.1.2",
-  "description": "Production-grade MCP server for Instagram. 79 tools — 22 anonymous (no credentials), 56 authenticated, 1 auto-mode. Profile scraping, engagement analytics, DM inbox/send, hashtag research, stories, reels, uploads, social actions, batch scraping up to 2000 profiles, post scheduling, account monitoring, multi-account sessions, OAuth support, comment sentiment analysis (EN/UZ/RU), multi-account pool with auto-failover, and challenge/2FA resolver.",
+  "description": "Production-grade MCP server for Instagram. 82 tools — 22 anonymous (no credentials), 59 authenticated, 1 auto-mode. Profile scraping, engagement analytics, DM inbox/send, hashtag research, stories, reels, uploads, social actions, batch scraping up to 2000 profiles, post scheduling, account monitoring, multi-account sessions, OAuth support, comment sentiment analysis (EN/UZ/RU), multi-account pool with auto-failover, and challenge/2FA resolver.",
   "author": {
     "name": "mpython77",
     "url": "https://github.com/mpython77/instagram-mcp"
@@ -1374,6 +1374,66 @@
         "required": [
           "thread_id",
           "item_id"
+        ]
+      }
+    },
+    {
+      "name": "instagram_dm_mute",
+      "description": "Mute or unmute a DM thread. (AUTH)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "thread_id": {
+            "type": "string"
+          },
+          "mute": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "thread_id"
+        ]
+      }
+    },
+    {
+      "name": "instagram_dm_share_post",
+      "description": "Share an Instagram post into a DM thread or to a user. (AUTH)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "media_id": {
+            "type": "string"
+          },
+          "thread_id": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "media_id"
+        ]
+      }
+    },
+    {
+      "name": "instagram_dm_media_messages",
+      "description": "List media messages (photos, videos, shared posts) in a DM thread. (AUTH)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "thread_id": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "thread_id"
         ]
       }
     },

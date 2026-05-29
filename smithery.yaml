@@ -1,7 +1,7 @@
 name: instagram-mcp
 version: "2.1.2"
 description: >-
-  Production-grade MCP server for Instagram. 79 tools — 22 anonymous (no credentials), 56
+  Production-grade MCP server for Instagram. 82 tools — 22 anonymous (no credentials), 59
   authenticated, 1 auto-mode. Profile scraping, engagement analytics, DM inbox/send, hashtag
   research, stories, reels, uploads, social actions (like, follow, comment, block), batch
   scraping up to 2000 profiles, post scheduling, account monitoring, multi-account sessions,
@@ -193,6 +193,12 @@ tools:
     description: "Delete a sent DM message. (AUTH)"
   - name: instagram_dm_mark_seen
     description: "Mark a DM thread as seen. (AUTH)"
+  - name: instagram_dm_mute
+    description: "Mute or unmute a DM thread. (AUTH)"
+  - name: instagram_dm_share_post
+    description: "Share an Instagram post into a DM thread or to a user. (AUTH)"
+  - name: instagram_dm_media_messages
+    description: "List media messages (photos, videos, shared posts) in a DM thread. (AUTH)"
   # upload
   - name: instagram_upload_photo
     description: "Upload 1–10 images as a post or carousel. (AUTH)"
