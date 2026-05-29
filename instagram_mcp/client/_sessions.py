@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import sys
-from typing import Dict, Optional
+from typing import Optional
 
 from ..exceptions import AuthError, FetchError
 from ..delay import JitterAsyncSession as _JitterAsyncSession

@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import logging
-import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-import json as _json
 
 from ..exceptions import FetchError
 
@@ -115,8 +113,8 @@ class ThreadsMixin:
         Returns:
             dict with posts (list), next_max_id, has_more.
         """
-        profile = await self.threads_profile(username)
-        user_id = profile.get("pk", "")
+        # Validate the user exists via the profile endpoint; HTML is re-fetched below.
+        await self.threads_profile(username)
         # We already have the HTML from threads_profile — fetch it again for posts
         import re as _re
 

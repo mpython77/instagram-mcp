@@ -16,7 +16,6 @@ from ..models import (
     GrowthVelocityInput,
 )
 from ._helpers import (
-    AuthTier,
     ToolDescriptor,
     _exception_to_tool_error,
     _tool_error,
@@ -260,7 +259,7 @@ def register_audience(
                 raise _tool_error(f"@{params.username} not found.", "not_found", "Verify the username.")
 
             try:
-                from ..parser import parse_profile, parse_feed_items
+                from ..parser import parse_profile
                 profile = parse_profile(user, params.username, config)
 
                 if profile.is_private:

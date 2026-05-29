@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
+import random
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
@@ -85,7 +85,6 @@ class UploadMixin:
     ) -> tuple:
         """Upload one image file, return (upload_id, width, height)."""
         import os as _os
-        import time as _time_mod
 
         if not _os.path.isfile(path):
             raise FetchError(f"Image file not found: {path!r}")
@@ -321,7 +320,6 @@ class UploadMixin:
 
         media = body.get("media") or {}
         media_id = str(media.get("pk") or media.get("id") or "")
-        code = str(media.get("code") or "")
 
         return {
             "ok":       True,
@@ -595,7 +593,7 @@ class UploadMixin:
 
         # JPEG: FF D8 FF
         if raw_bytes[:3] == b"\xff\xd8\xff":
-            width, height = InstagramClient._jpeg_dimensions(raw_bytes)
+            width, height = UploadMixin._jpeg_dimensions(raw_bytes)
             return raw_bytes, width, height
 
         # PNG: 89 50 4E 47  — read dimensions from IHDR chunk at bytes 16-24

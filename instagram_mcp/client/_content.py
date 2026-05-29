@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
-import time
-from typing import Any, Dict, List, Optional, Tuple
-from collections import Counter
+from typing import Any, Dict, List, Optional
 
 import json as _json
 
@@ -1092,7 +1089,6 @@ class ContentMixin:
                 clips_meta = media.get("clips_metadata") or {}
                 challenge   = clips_meta.get("challenge_info") or {}
                 challenge_title = (challenge.get("challenge") or {}).get("title") or ""
-                branded_content = clips_meta.get("branded_content_tag_info") or {}
                 mashup_count = (clips_meta.get("mashup_info") or {}).get("formatted_mashups_count") or ""
 
                 # Carousel
@@ -1100,7 +1096,6 @@ class ContentMixin:
                 carousel_items = []
                 if mtype == 8:
                     for ci in (media.get("carousel_media") or []):
-                        ci_cap = ci.get("caption") or {}
                         carousel_items.append({
                             "media_type":  ci.get("media_type", 1),
                             "shortcode":   ci.get("code") or ci.get("pk", ""),
@@ -2198,7 +2193,7 @@ class ContentMixin:
         if resp.status_code not in (200, 201):
             raise FetchError(f"activity_feed: HTTP {resp.status_code}: {body_text[:200]}")
         if body_text.lstrip().startswith("<"):
-            raise FetchError(f"activity_feed: got HTML (session blocked)")
+            raise FetchError("activity_feed: got HTML (session blocked)")
         try:
             body = _json.loads(body_text)
         except Exception:
@@ -2438,7 +2433,7 @@ class ContentMixin:
 
         # Top 3 posts by likes
         top_posts = sorted(
-            [{"caption": c[:200], "like_count": l} for c, l in zip(captions, likes)],
+            [{"caption": c[:200], "like_count": like} for c, like in zip(captions, likes)],
             key=lambda x: -x["like_count"],
         )[:3]
 

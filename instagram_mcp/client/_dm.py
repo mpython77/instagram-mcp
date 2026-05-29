@@ -6,12 +6,11 @@ import asyncio
 import logging
 import random
 import time
-import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 import json as _json
 
-from ..exceptions import AuthError, FetchError
+from ..exceptions import FetchError
 
 logger = logging.getLogger("instagram_mcp.client")
 

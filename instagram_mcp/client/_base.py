@@ -13,14 +13,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from ..cache import SmartCache
 from ..config import MCPConfig
 from ..cookie_manager import CookieManager
 from ..exceptions import FetchError
-from ..models import DateRange
 from ..proxy_manager import ProxyManager
 from ..rate_limiter import AdaptiveRateLimiter
 from ..account_pool import AccountPool
@@ -33,7 +31,7 @@ except ImportError:  # pragma: no cover
     AsyncSession = None  # type: ignore
     CURL_CFFI_AVAILABLE = False
 
-from ..delay import DelaySimulator, JitterAsyncSession
+from ..delay import DelaySimulator
 
 from ._retry import RetryMixin
 from ._sessions import SessionMixin
@@ -45,7 +43,6 @@ from ._content import ContentMixin
 from ._upload import UploadMixin
 from ._dm import DmMixin
 from ._threads import ThreadsMixin
-from ._utils import _mask_proxy
 
 logger = logging.getLogger("instagram_mcp.client")
 
@@ -147,7 +144,7 @@ class InstagramClient(
 
         if not session:
             return data
-        
+
         # Helper to avoid duplicating logic
         async def _cache_val(val: str) -> str:
             if not val or not val.startswith("http"):
