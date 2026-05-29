@@ -1,4 +1,10 @@
-"""Composable request pipeline middleware."""
+"""Composable request pipeline middleware.
+
+This module provides utilities for integration into the request pipeline.
+It defines the MiddlewarePipeline and built-in middleware implementations
+(ShadowBanMiddleware, CookieHealthMiddleware, FingerprintMiddleware,
+RateLimitMiddleware) that can be composed into a processing chain.
+"""
 
 from __future__ import annotations
 

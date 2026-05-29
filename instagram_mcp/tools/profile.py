@@ -49,6 +49,7 @@ from ._helpers import (
     _exception_to_tool_error,
     _paginate_feed,
     _tool_error,
+    record_tool_call,
     sanitize_username,
 )
 
@@ -250,6 +251,7 @@ def register_profile(
 
         elapsed = time.perf_counter() - _t0
         await ctx.info(f"@{params.username} ✓ — {elapsed:.2f}s")
+        record_tool_call("instagram_profile", elapsed)
         await exporter.save("profile", params.username, {
             "profile": profile,
             "feed_tags": feed_tags_result,
@@ -359,6 +361,7 @@ def register_profile(
             raise _exception_to_tool_error(e)
 
         elapsed = time.perf_counter() - _t0
+        record_tool_call("instagram_feed_deep", elapsed)
         await ctx.info(
             f"@{params.username} ✓ — {feed_tags.posts_checked} posts, "
             f"{len(feed_tags.tags)} tags — {elapsed:.2f}s"

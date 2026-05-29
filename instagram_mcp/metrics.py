@@ -15,6 +15,7 @@ class MetricsCollector:
     """In-memory metrics collector for instagram-mcp tools."""
 
     _instance: Optional["MetricsCollector"] = None
+    _instance_lock: threading.Lock = threading.Lock()
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -29,15 +30,18 @@ class MetricsCollector:
 
     @classmethod
     def get_instance(cls) -> "MetricsCollector":
-        """Get or create the singleton instance."""
+        """Get or create the singleton instance (thread-safe)."""
         if cls._instance is None:
-            cls._instance = cls()
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = cls()
         return cls._instance
 
     @classmethod
     def reset_instance(cls) -> None:
         """Reset singleton (for testing)."""
-        cls._instance = None
+        with cls._instance_lock:
+            cls._instance = None
 
     def record_request(
         self, tool_name: str, duration_s: float, error: Optional[str] = None

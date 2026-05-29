@@ -20,6 +20,7 @@ from ._helpers import (
     ToolDescriptor,
     _exception_to_tool_error,
     _tool_error,
+    record_tool_call,
     sanitize_username,
 )
 
@@ -139,12 +140,11 @@ def register_audience(
                 posts_count = f.get("media_count", f.get("posts_count", 0)) or 0
                 following_count = f.get("following_count", f.get("following", 0)) or 0
                 follower_count = f.get("follower_count", f.get("followers", 0)) or 0
-                has_pic = f.get("has_anonymous_profile_picture", True)
-                profile_pic = f.get("profile_pic_url", "")
+                has_default_pic = f.get("has_anonymous_profile_picture", False)
 
                 if posts_count == 0:
                     zero_posts += 1
-                if has_pic or not profile_pic:
+                if has_default_pic:
                     no_pic += 1
                 if follower_count > 0 and following_count / max(follower_count, 1) > 10:
                     high_ratio += 1
@@ -198,6 +198,7 @@ def register_audience(
 
             elapsed = time.perf_counter() - _t0
             await ctx.info(f"@{params.username} fake follower check done in {elapsed:.2f}s")
+            record_tool_call("instagram_fake_follower_check", elapsed)
             await exporter.save("fake_follower_check", params.username, {
                 "score": score,
                 "sampled": total_sampled,
@@ -353,6 +354,7 @@ def register_audience(
 
             elapsed = time.perf_counter() - _t0
             await ctx.info(f"@{params.username} growth velocity done in {elapsed:.2f}s")
+            record_tool_call("instagram_growth_velocity", elapsed)
             await exporter.save("growth_velocity", params.username, {
                 "velocity": velocity,
                 "growth_pct": round(growth_pct, 1),
@@ -487,6 +489,7 @@ def register_audience(
 
         elapsed = time.perf_counter() - _t0
         await ctx.info(f"@{params.username} best time to post done in {elapsed:.2f}s")
+        record_tool_call("instagram_best_time_to_post", elapsed)
         await exporter.save("best_time_to_post", params.username, {
             "top_hours": [{"hour": h, "count": c} for h, c in top_hours],
             "top_days": [{"day": day_names[d], "count": c} for d, c in top_days],

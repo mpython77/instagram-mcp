@@ -1,4 +1,8 @@
-"""Cookie health monitoring - proactive cookie expiry detection."""
+"""Cookie health monitoring - proactive cookie expiry detection.
+
+This module provides utilities for integration into the request pipeline.
+See middleware.py for composable usage.
+"""
 
 from __future__ import annotations
 

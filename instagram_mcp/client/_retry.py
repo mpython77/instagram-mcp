@@ -7,25 +7,9 @@ import time
 from typing import Any, Awaitable, Callable, Dict, Optional, Set
 
 from ..exceptions import FetchError
+from ._utils import _mask_proxy
 
 logger = logging.getLogger("instagram_mcp.client")
-
-
-def _mask_proxy(url: Optional[str]) -> str:
-    """Mask credentials in a proxy URL for safe logging."""
-    if not url:
-        return "direct"
-    try:
-        from urllib.parse import urlparse, urlunparse
-        parsed = urlparse(url)
-        if parsed.username or parsed.password:
-            netloc = f"***@{parsed.hostname}"
-            if parsed.port:
-                netloc += f":{parsed.port}"
-            return urlunparse(parsed._replace(netloc=netloc))
-    except Exception:
-        pass
-    return url
 
 
 class RetryMixin:

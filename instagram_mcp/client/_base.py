@@ -15,7 +15,6 @@ import asyncio
 import logging
 import re
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse, urlunparse
 
 from ..cache import SmartCache
 from ..config import MCPConfig
@@ -46,24 +45,9 @@ from ._content import ContentMixin
 from ._upload import UploadMixin
 from ._dm import DmMixin
 from ._threads import ThreadsMixin
+from ._utils import _mask_proxy
 
 logger = logging.getLogger("instagram_mcp.client")
-
-
-def _mask_proxy(url: Optional[str]) -> str:
-    """Mask credentials in a proxy URL for safe logging."""
-    if not url:
-        return "direct"
-    try:
-        parsed = urlparse(url)
-        if parsed.username or parsed.password:
-            netloc = f"***@{parsed.hostname}"
-            if parsed.port:
-                netloc += f":{parsed.port}"
-            return urlunparse(parsed._replace(netloc=netloc))
-    except Exception:
-        pass
-    return url
 
 
 class InstagramClient(
@@ -280,23 +264,4 @@ class InstagramClient(
 
     # ── Centralised retry helper ─────────────────────────────────────────────
 
-
-
-def _caption_insights(length: float, hashtags: float, emoji_rate: float, cta_rate: float) -> List[str]:
-    tips = []
-    if length < 50:
-        tips.append("Captions are very short — try 100-150 chars for more context and discoverability")
-    elif length > 500:
-        tips.append("Captions are long — consider breaking them up with line breaks for readability")
-    if hashtags < 5:
-        tips.append("Low hashtag count — using 10-15 targeted hashtags improves reach")
-    elif hashtags > 25:
-        tips.append("High hashtag count — reduce to 10-20 relevant hashtags for better quality signal")
-    if emoji_rate < 0.3:
-        tips.append("Low emoji usage — emojis in captions increase engagement rate by ~15%")
-    if cta_rate < 0.2:
-        tips.append("Low CTA usage — adding a call-to-action (e.g. 'comment below') doubles comments")
-    if not tips:
-        tips.append("Caption strategy looks solid — good length, hashtags, and engagement signals")
-    return tips
 

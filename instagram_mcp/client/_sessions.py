@@ -9,6 +9,7 @@ from typing import Dict, Optional
 
 from ..exceptions import AuthError, FetchError
 from ..delay import JitterAsyncSession as _JitterAsyncSession
+from ._utils import _mask_proxy
 
 try:
     from curl_cffi.requests import AsyncSession  # type: ignore
@@ -24,23 +25,6 @@ def _get_jitter_session_cls():
     if client_pkg and hasattr(client_pkg, "JitterAsyncSession"):
         return client_pkg.JitterAsyncSession
     return _JitterAsyncSession
-
-
-def _mask_proxy(url: Optional[str]) -> str:
-    """Mask credentials in a proxy URL for safe logging."""
-    if not url:
-        return "direct"
-    try:
-        from urllib.parse import urlparse, urlunparse
-        parsed = urlparse(url)
-        if parsed.username or parsed.password:
-            netloc = f"***@{parsed.hostname}"
-            if parsed.port:
-                netloc += f":{parsed.port}"
-            return urlunparse(parsed._replace(netloc=netloc))
-    except Exception:
-        pass
-    return url
 
 
 class SessionMixin:

@@ -1,4 +1,8 @@
-"""Shadow-ban detection - detects when Instagram returns 200 OK but empty data."""
+"""Shadow-ban detection - detects when Instagram returns 200 OK but empty data.
+
+This module provides utilities for integration into the request pipeline.
+See middleware.py for composable usage.
+"""
 
 from __future__ import annotations
 

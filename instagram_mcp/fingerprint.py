@@ -1,4 +1,8 @@
-"""Browser fingerprint rotation for anti-detection."""
+"""Browser fingerprint rotation for anti-detection.
+
+This module provides utilities for integration into the request pipeline.
+See middleware.py for composable usage.
+"""
 
 from __future__ import annotations
 
