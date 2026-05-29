@@ -1,0 +1,23 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Remove unittest.mock imports from production code. The pattern 'from unittest.mock import Mock; if not isinstance(client, Mock)' appears in tools/profile.py (lines 202,240) and tools/content.py (line 153). Also remove 'from unittest.mock import MagicMock' in client.py cache_media_urls (line ~141). Instead, make cache_media_urls gracefully handle the case where no session is available by returning data unchanged without needing mock detection.",
+  "status": "pending",
+  "steps": [
+    "In instagram_mcp/client.py, in cache_media_urls method (line 137): Remove 'from unittest.mock import MagicMock' and the 'isinstance(session, MagicMock)' check. Instead, check 'if not session:' (which already exists from the try/except above setting session to None). The logic after getting session should be: if session is None, return data unchanged.",
+    "In instagram_mcp/tools/profile.py: Remove lines 202-203 ('from unittest.mock import Mock' and 'if not isinstance(client, Mock):') and remove lines 240-241 (same pattern). Make the cache_media_urls calls unconditional: just 'await client.cache_media_urls(profile)' and 'await client.cache_media_urls(feed_tags_result)'. The client method itself now handles the graceful fallback.",
+    "In instagram_mcp/tools/content.py: Remove lines 153-154 ('from unittest.mock import Mock' and 'if not isinstance(client, Mock):') and make the call unconditional: 'await client.cache_media_urls(info)'.",
+    "Run the test suite to confirm nothing breaks."
+  ],
+  "acceptance_criteria": [
+    "grep -r 'from unittest.mock' instagram_mcp/ returns no results (only in tests/)",
+    "All existing tests pass unchanged",
+    "cache_media_urls returns data unchanged when session is unavailable"
+  ],
+  "verification": [
+    "grep -r 'from unittest.mock' instagram_mcp/ should return empty",
+    "pytest tests/ -v --tb=short --ignore=tests/test_upload.py --ignore=tests/test_new_tools.py --ignore=tests/test_final_push.py"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

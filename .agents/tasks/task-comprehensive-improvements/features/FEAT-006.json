@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-006",
+  "type": "feat",
+  "description": "Add Plugin System and Metrics/Observability. These are infrastructure features that allow third-party extensions and operational visibility.",
+  "status": "pending",
+  "steps": [
+    "Create instagram_mcp/plugins.py: Implement PluginManager class. Use importlib.metadata entry_points (group='instagram_mcp.tools') to discover third-party tool registrars. Provide load_plugins() method that finds all entry points, imports them, and returns a list of registrar callables. Each plugin entry point should be a function matching the register_<name>(mcp, client, config, exporter) -> list[ToolDescriptor] signature. Provide list_plugins() -> list[dict] that returns info about loaded plugins. Handle import errors gracefully with logging.",
+    "Create instagram_mcp/metrics.py: Implement MetricsCollector class. Track: request_count (per tool name), request_duration_seconds (histogram-like: min/max/avg/p95 per tool), error_count (per tool, per error_type), cache_hit_count, cache_miss_count. Use simple in-memory counters (no external dependencies). Provide record_request(tool_name, duration_s, error=None) method. Provide get_metrics() -> dict method returning all collected metrics. Provide reset() method. Add a context manager/decorator pattern for easy instrumentation: @metrics.track('tool_name').",
+    "Integrate plugins into instagram_mcp/__init__.py create_mcp_server(): After register_tools(), call plugin_manager.load_plugins() and invoke each discovered registrar. Log how many plugin tools were loaded.",
+    "Integrate metrics into the tool registration: In instagram_mcp/tools/_helpers.py or a new wrapper, add metrics tracking so every tool call records its duration and success/failure to the MetricsCollector singleton.",
+    "Add 'instagram_metrics' tool to tools/server.py that exposes current metrics as formatted markdown (request counts, durations, error rates, cache stats). Also add 'instagram_plugins' tool that lists loaded plugins.",
+    "Add tests: tests/test_plugins.py (test discovery with mock entry points, test error handling). tests/test_metrics.py (test recording, retrieval, reset, concurrent access).",
+    "Run the full test suite."
+  ],
+  "acceptance_criteria": [
+    "instagram_mcp/plugins.py exists with PluginManager class",
+    "instagram_mcp/metrics.py exists with MetricsCollector class",
+    "Plugin loading is called during server creation",
+    "MetricsCollector tracks request count and duration",
+    "New tools instagram_metrics and instagram_plugins are registered",
+    "All new tests pass",
+    "All existing tests still pass"
+  ],
+  "verification": [
+    "pytest tests/test_plugins.py tests/test_metrics.py -v",
+    "pytest tests/ -v --tb=short --ignore=tests/test_upload.py --ignore=tests/test_new_tools.py --ignore=tests/test_final_push.py"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-005",
+  "type": "feat",
+  "description": "Add Audience Intelligence Tools (fake follower detection, growth velocity, best time to post), Enhanced Event-Based Monitoring, and CSV Export. These are user-facing features that add new MCP tools.",
+  "status": "pending",
+  "steps": [
+    "Create instagram_mcp/tools/audience.py: Implement register_audience(mcp, client, config, exporter) -> list[ToolDescriptor]. Add three tools: (1) instagram_fake_follower_check - takes username, fetches followers sample and engagement data, detects anomalies (zero-post accounts, no profile pics, follow/follower ratio > 10, accounts following > 5000 with < 100 followers). Returns score 0-100 and breakdown. (2) instagram_growth_velocity - takes username, fetches feed over time, estimates follower growth rate from engagement trends. (3) instagram_best_time_to_post - takes username, fetches recent post comments timestamps, aggregates by hour/day to find when audience is most active. Follow the exact same registrar pattern as tools/analysis.py (use @mcp.tool decorator inside the function, return list[ToolDescriptor]).",
+    "Update instagram_mcp/tools/__init__.py: Add 'audience' to CANONICAL_ORDER tuple (after 'automation', before 'server'). Import audience module. Add 'audience': audience.register_audience to _REGISTRARS dict.",
+    "Extend instagram_mcp/monitor.py: Add support for multiple event types beyond 'new_post'. Add detection for: 'follower_spike' (>5% increase detected between checks), 'follower_drop' (>5% decrease), 'bio_change' (bio text changed), 'went_private' (was public, now private), 'went_public' (was private, now public), 'new_story' (new story detected). Update MonitorEntry to track previous profile state (followers count, bio, is_private). Update _check_account to compare current vs previous state and fire appropriate event webhooks.",
+    "Extend instagram_mcp/exporter.py: Add CSV export capability. Add a CsvExporter class alongside JsonExporter. Add method export_csv(tool_name: str, subject: str, data: dict) -> Path that flattens the data dict into rows and writes a CSV file. Also add export_markdown(tool_name: str, subject: str, content: str) -> Path.",
+    "Create a new tool in instagram_mcp/tools/server.py (or integrate into existing server tools): Add 'instagram_export' tool that takes format='csv'|'markdown'|'json', tool_name, subject, and data parameters and exports on demand.",
+    "Create Pydantic input models in instagram_mcp/models.py for the new audience tools: FakeFollowerCheckInput(username: str, sample_size: int = 100), GrowthVelocityInput(username: str, days: int = 30), BestTimeToPostInput(username: str, max_posts: int = 50).",
+    "Add tests: tests/test_audience_tools.py with at least 3 tests per tool (mock the client responses). tests/test_csv_export.py for the CSV export functionality.",
+    "Run the full test suite."
+  ],
+  "acceptance_criteria": [
+    "instagram_mcp/tools/audience.py exists with 3 tools registered",
+    "CANONICAL_ORDER in tools/__init__.py includes 'audience'",
+    "_REGISTRARS includes audience.register_audience",
+    "Monitor supports at least 4 event types beyond new_post",
+    "CsvExporter class exists in exporter.py",
+    "New tests pass",
+    "All existing tests still pass"
+  ],
+  "verification": [
+    "pytest tests/test_audience_tools.py tests/test_csv_export.py -v",
+    "pytest tests/ -v --tb=short --ignore=tests/test_upload.py --ignore=tests/test_new_tools.py --ignore=tests/test_final_push.py"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

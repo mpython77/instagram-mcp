@@ -1,0 +1,19 @@
+{
+  "id": "FEAT-001",
+  "type": "chore",
+  "description": "Setup environment: install dependencies, run existing tests to confirm baseline is green.",
+  "status": "completed",
+  "steps": [
+    "Run pip install -e '.[dev]' in /projects/sandbox/instagram-mcp",
+    "Run pytest tests/ -v --tb=short --ignore=tests/test_upload.py --ignore=tests/test_new_tools.py --ignore=tests/test_final_push.py to confirm all existing tests pass"
+  ],
+  "acceptance_criteria": [
+    "pip install -e '.[dev]' succeeds",
+    "pytest exits with 0 (all tests pass)"
+  ],
+  "verification": [
+    "pytest tests/ -v --tb=short --ignore=tests/test_upload.py --ignore=tests/test_new_tools.py --ignore=tests/test_final_push.py"
+  ],
+  "blocked_reason": null,
+  "findings": "Default system Python is 3.9.25 which does not meet >=3.10 requirement. Used pyenv shell 3.11.15. Set pyenv local 3.11.15 so .python-version file anchors future runs. All 780 tests pass in ~24s. pytest-asyncio 1.4.0 installed (mode=auto). curl_cffi installed but tests mock it via conftest.py."
+}
