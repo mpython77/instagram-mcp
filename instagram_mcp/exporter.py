@@ -306,8 +306,8 @@ def _make_summary(tool: str, data: dict) -> dict:
         s["author"] = post.get("username", "")
         s["type"] = post.get("post_type", "")
         s["date"] = post.get("taken_at_str", "")
-        s["likes"] = post.get("like_count", 0)
-        s["comments"] = post.get("comment_count", 0)
+        s["likes"] = post.get("likes", 0)
+        s["comments"] = post.get("comments", 0)
         loc = post.get("location") or {}
         if loc.get("name"):
             s["location"] = loc["name"]
@@ -348,11 +348,11 @@ def _make_summary(tool: str, data: dict) -> dict:
         actual = [c for c in comments if not c.get("is_caption")]
         s["fetched"] = len(actual)
         if actual:
-            top = sorted(actual, key=lambda c: c.get("like_count", 0), reverse=True)[:3]
+            top = sorted(actual, key=lambda c: c.get("comment_like_count", 0), reverse=True)[:3]
             s["top_comments"] = [
                 {
                     "author": c.get("username", ""),
-                    "likes": c.get("like_count", 0),
+                    "likes": c.get("comment_like_count", 0),
                     "text": (c.get("text") or "")[:100],
                 }
                 for t in top

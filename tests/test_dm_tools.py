@@ -332,3 +332,30 @@ async def test_dm_media_messages_no_auth():
     with pytest.raises(FetchError, match="authentication"):
         await client.dm_media_messages("thread123")
     await client.close()
+
+
+
+# ── Regression: dm_media_messages filters on the right key ────────────────────
+# fetch_dm_thread emits messages keyed by "item_type" (not "type"). Before the
+# fix, dm_media_messages filtered on m.get("type") and always returned [].
+
+
+@pytest.mark.asyncio
+async def test_dm_media_messages_filters_by_item_type():
+    client = _client_without_auth()
+    client.fetch_dm_thread = AsyncMock(
+        return_value={
+            "messages": [
+                {"item_id": "1", "item_type": "text", "text": "hi"},
+                {"item_id": "2", "item_type": "media_share", "media_url": "u"},
+                {"item_id": "3", "item_type": "raven_media", "thumb_url": "t"},
+                {"item_id": "4", "item_type": "voice_media", "audio_url": "a"},
+                {"item_id": "5", "item_type": "like", "text": "<3"},
+            ]
+        }
+    )
+    out = await client.dm_media_messages("thread123", limit=50)
+    types = {m["item_type"] for m in out}
+    assert types == {"media_share", "raven_media", "voice_media"}
+    assert len(out) == 3
+    await client.close()

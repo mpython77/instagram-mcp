@@ -1019,9 +1019,15 @@ class DmMixin:
     async def dm_media_messages(self, thread_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         """List all media messages (photos, videos, shared posts) in a DM thread."""
         data = await self.fetch_dm_thread(thread_id, limit=limit)
-        media_types = {"media", "reel_share", "clip", "felix_share", "xma_media_share", "animated_media", "voice_media"}
+        # Match the item_type values fetch_dm_thread emits (it stores the raw
+        # Instagram item_type under "item_type", not "type"). media_share and
+        # raven_media are the primary photo/video/shared-post carriers.
+        media_types = {
+            "media", "media_share", "raven_media", "reel_share", "clip",
+            "felix_share", "xma_media_share", "animated_media", "voice_media",
+        }
         messages = data.get("messages", [])
-        return [m for m in messages if m.get("type") in media_types]
+        return [m for m in messages if m.get("item_type") in media_types]
 
     # ── P2: Comment methods ───────────────────────────────────────────────────
 

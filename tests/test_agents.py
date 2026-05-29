@@ -186,3 +186,25 @@ async def test_content_audit_agent_run(mock_client, mock_config):
     result = await agent.run("testuser")
     assert result.found is True
     assert result.posts_analyzed == 1
+
+
+
+@pytest.mark.asyncio
+async def test_influencer_vetting_survives_pagination_error(mock_client, mock_config):
+    """Regression: if the engagement step raises and is swallowed, run() must
+    still compute a verdict instead of crashing with UnboundLocalError on
+    is_dead / last_post_days (Step 4 reads them)."""
+    agent = InfluencerVettingAgent(mock_client, mock_config)
+    mock_client.fetch_user.return_value = {
+        "id": "123",
+        "username": "testuser",
+        "edge_followed_by": {"count": 1000},
+        "edge_owner_to_timeline_media": {"count": 10, "edges": []},
+    }
+    # Force the engagement pagination to blow up.
+    mock_client.fetch_feed_items.side_effect = Exception("network down")
+
+    result = await agent.run("testuser")
+    assert result.found is True
+    assert result.verdict in ("recommended", "conditional", "not_recommended", "dead")
+    assert any("Engagement analysis failed" in e for e in result.errors)
