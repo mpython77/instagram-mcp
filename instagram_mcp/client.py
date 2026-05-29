@@ -136,8 +136,7 @@ class InstagramClient:
 
     async def cache_media_urls(self, data: Any) -> Any:
         """Scan data for media URLs, download them, and replace with local file URIs."""
-        # Get/reuse a session from the direct pool safely, handling unit test mocks
-        from unittest.mock import MagicMock
+        # Get/reuse a session from the direct pool safely
         try:
             session_or_future = self._get_session(None)
             if asyncio.iscoroutine(session_or_future) or hasattr(session_or_future, "__await__"):
@@ -147,7 +146,7 @@ class InstagramClient:
         except Exception:
             session = None
 
-        if not session or isinstance(session, MagicMock):
+        if not session:
             return data
         
         # Helper to avoid duplicating logic

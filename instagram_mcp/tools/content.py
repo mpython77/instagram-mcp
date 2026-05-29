@@ -150,9 +150,7 @@ def register_content(mcp, client, config, exporter) -> list[ToolDescriptor]:
                     "Verify the shortcode is correct and the post is publicly visible.",
                 )
 
-            from unittest.mock import Mock
-            if not isinstance(client, Mock):
-                await client.cache_media_urls(info)
+            await client.cache_media_urls(info)
             out = format_post_markdown(info)
 
         except ToolError:

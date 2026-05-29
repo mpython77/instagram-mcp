@@ -199,9 +199,7 @@ def register_profile(
 
         try:
             profile = parse_profile(user, params.username, config)
-            from unittest.mock import Mock
-            if not isinstance(client, Mock):
-                await client.cache_media_urls(profile)
+            await client.cache_media_urls(profile)
 
             is_dead, last_post_days = False, 0
             feed_tags_result = None  # set in else branch below when include_feed=True
@@ -237,9 +235,7 @@ def register_profile(
                         feed_items, params.max_feed_posts, params.max_age_days,
                         since_timestamp=_since, until_timestamp=_until,
                     )
-                    from unittest.mock import Mock
-                    if not isinstance(client, Mock):
-                        await client.cache_media_urls(feed_tags_result)
+                    await client.cache_media_urls(feed_tags_result)
                     if params.check_alive:
                         is_dead, last_post_days = check_dead_account_from_items(
                             feed_items, profile.posts_count, params.dead_threshold_days
