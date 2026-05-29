@@ -2,7 +2,7 @@
   "id": "FEAT-005",
   "type": "feat",
   "description": "Add Audience Intelligence Tools (fake follower detection, growth velocity, best time to post), Enhanced Event-Based Monitoring, and CSV Export. These are user-facing features that add new MCP tools.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "Create instagram_mcp/tools/audience.py: Implement register_audience(mcp, client, config, exporter) -> list[ToolDescriptor]. Add three tools: (1) instagram_fake_follower_check - takes username, fetches followers sample and engagement data, detects anomalies (zero-post accounts, no profile pics, follow/follower ratio > 10, accounts following > 5000 with < 100 followers). Returns score 0-100 and breakdown. (2) instagram_growth_velocity - takes username, fetches feed over time, estimates follower growth rate from engagement trends. (3) instagram_best_time_to_post - takes username, fetches recent post comments timestamps, aggregates by hour/day to find when audience is most active. Follow the exact same registrar pattern as tools/analysis.py (use @mcp.tool decorator inside the function, return list[ToolDescriptor]).",
     "Update instagram_mcp/tools/__init__.py: Add 'audience' to CANONICAL_ORDER tuple (after 'automation', before 'server'). Import audience module. Add 'audience': audience.register_audience to _REGISTRARS dict.",
