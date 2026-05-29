@@ -2,7 +2,7 @@
   "id": "FEAT-006",
   "type": "feat",
   "description": "Add Plugin System and Metrics/Observability. These are infrastructure features that allow third-party extensions and operational visibility.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create instagram_mcp/plugins.py: Implement PluginManager class. Use importlib.metadata entry_points (group='instagram_mcp.tools') to discover third-party tool registrars. Provide load_plugins() method that finds all entry points, imports them, and returns a list of registrar callables. Each plugin entry point should be a function matching the register_<name>(mcp, client, config, exporter) -> list[ToolDescriptor] signature. Provide list_plugins() -> list[dict] that returns info about loaded plugins. Handle import errors gracefully with logging.",
     "Create instagram_mcp/metrics.py: Implement MetricsCollector class. Track: request_count (per tool name), request_duration_seconds (histogram-like: min/max/avg/p95 per tool), error_count (per tool, per error_type), cache_hit_count, cache_miss_count. Use simple in-memory counters (no external dependencies). Provide record_request(tool_name, duration_s, error=None) method. Provide get_metrics() -> dict method returning all collected metrics. Provide reset() method. Add a context manager/decorator pattern for easy instrumentation: @metrics.track('tool_name').",
@@ -26,5 +26,5 @@
     "pytest tests/ -v --tb=short --ignore=tests/test_upload.py --ignore=tests/test_new_tools.py --ignore=tests/test_final_push.py"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 852 tests pass (20 new + 832 existing). Added 2 anonymous tools (instagram_metrics, instagram_plugins) to server toolset. Updated README tool counts to 79 total, 22 anonymous. Plugin system uses importlib.metadata entry_points with group 'instagram_mcp.tools'. MetricsCollector uses singleton pattern with thread-safe locking. The track_tool async context manager can be used to instrument individual tool calls."
 }
