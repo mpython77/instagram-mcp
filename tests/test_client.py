@@ -1501,3 +1501,81 @@ async def test_fetch_highlights_redirected(client):
             with pytest.raises(FetchError, match="redirected"):
                 await client.fetch_highlights("user_id")
 
+
+
+
+# ── Regression: cache_media_urls must handle StoryItem / ReelItem ─────────────
+# StoryItem and ReelItem expose only `thumbnail_url` (no `display_url` /
+# `video_url`). Before the fix, cache_media_urls accessed `.display_url` /
+# `.video_url` on them and raised AttributeError whenever a story/reel flowed
+# through media caching.
+
+
+def _make_story(thumbnail_url: str = "https://cdn.example/story.jpg"):
+    from instagram_mcp.models import StoryItem
+
+    return StoryItem(
+        pk="1",
+        shortcode="abc",
+        taken_at=0,
+        taken_at_str="",
+        expiring_at=0,
+        media_type=1,
+        duration_secs=0.0,
+        width=1080,
+        height=1920,
+        thumbnail_url=thumbnail_url,
+        caption="",
+        accessibility_caption="",
+        is_paid_partnership=False,
+        can_reshare=True,
+        can_reply=True,
+        has_audio=False,
+        mentions=[],
+        hashtags=[],
+        linked_post_code="",
+        music_title="",
+        music_artist="",
+    )
+
+
+def test_story_and_reel_have_no_display_url():
+    """Contract that justifies the cache_media_urls fix."""
+    from instagram_mcp.models import ReelItem
+
+    story = _make_story()
+    reel = ReelItem(thumbnail_url="https://cdn.example/reel.jpg")
+    assert not hasattr(story, "display_url")
+    assert not hasattr(story, "video_url")
+    assert not hasattr(reel, "display_url")
+    assert hasattr(story, "thumbnail_url")
+    assert hasattr(reel, "thumbnail_url")
+
+
+@pytest.mark.asyncio
+async def test_cache_media_urls_handles_story_item(client):
+    from instagram_mcp.models import ReelItem
+
+    client._get_session = MagicMock(return_value="fake-session")
+    client._media_cache = MagicMock()
+    client._media_cache.get_or_fetch = AsyncMock(return_value="file:///cached.jpg")
+
+    story = _make_story("https://cdn.example/story.jpg")
+    out = await client.cache_media_urls(story)
+    assert out.thumbnail_url == "file:///cached.jpg"
+
+    reel = ReelItem(thumbnail_url="https://cdn.example/reel.jpg")
+    out2 = await client.cache_media_urls(reel)
+    assert out2.thumbnail_url == "file:///cached.jpg"
+
+
+@pytest.mark.asyncio
+async def test_cache_media_urls_story_in_list(client):
+    """The recursive list branch must also handle StoryItem without crashing."""
+    client._get_session = MagicMock(return_value="fake-session")
+    client._media_cache = MagicMock()
+    client._media_cache.get_or_fetch = AsyncMock(return_value="file:///cached.jpg")
+
+    stories = [_make_story("https://cdn.example/1.jpg"), _make_story("https://cdn.example/2.jpg")]
+    out = await client.cache_media_urls(stories)
+    assert all(s.thumbnail_url == "file:///cached.jpg" for s in out)

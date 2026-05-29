@@ -165,13 +165,12 @@ class InstagramClient(
             if data.display_url:
                 data.display_url = await _cache_val(data.display_url)
         elif isinstance(data, StoryItem):
-            if data.display_url:
-                data.display_url = await _cache_val(data.display_url)
-            if data.video_url:
-                data.video_url = await _cache_val(data.video_url)
+            # StoryItem exposes a single media URL field: thumbnail_url.
+            # (It has no display_url/video_url — accessing those raised AttributeError.)
+            if data.thumbnail_url:
+                data.thumbnail_url = await _cache_val(data.thumbnail_url)
         elif isinstance(data, ReelItem):
-            if data.display_url:
-                data.display_url = await _cache_val(data.display_url)
+            # ReelItem exposes thumbnail_url only (no display_url).
             if data.thumbnail_url:
                 data.thumbnail_url = await _cache_val(data.thumbnail_url)
         elif isinstance(data, FeedTagResult):
