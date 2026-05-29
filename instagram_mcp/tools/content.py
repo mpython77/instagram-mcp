@@ -54,6 +54,7 @@ from ._helpers import (
     ToolDescriptor,
     _exception_to_tool_error,
     _tool_error,
+    record_tool_call,
     sanitize_username,
 )
 
@@ -150,9 +151,7 @@ def register_content(mcp, client, config, exporter) -> list[ToolDescriptor]:
                     "Verify the shortcode is correct and the post is publicly visible.",
                 )
 
-            from unittest.mock import Mock
-            if not isinstance(client, Mock):
-                await client.cache_media_urls(info)
+            await client.cache_media_urls(info)
             out = format_post_markdown(info)
 
         except ToolError:
@@ -162,6 +161,7 @@ def register_content(mcp, client, config, exporter) -> list[ToolDescriptor]:
 
         elapsed = time.perf_counter() - _t0
         loc_name = info.location.name if info.location.has_location else "no location"
+        record_tool_call("instagram_post", elapsed)
         await ctx.info(
             f"{shortcode} ✓ — @{info.username}, {info.taken_at_str}, "
             f"{loc_name} — {elapsed:.2f}s"
@@ -281,6 +281,7 @@ def register_content(mcp, client, config, exporter) -> list[ToolDescriptor]:
             )
 
         elapsed = time.perf_counter() - _t0
+        record_tool_call("instagram_post_comments", elapsed)
         await ctx.info(
             f"Post {shortcode} comments ✓ — {len(actual)} comments, "
             f"{pages_fetched} page(s) — {elapsed:.2f}s"

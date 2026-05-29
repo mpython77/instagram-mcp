@@ -12,13 +12,14 @@ task 8.2 retires it; do not remove or modify it from here.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from mcp.server.fastmcp import Context
 from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import BaseModel
 
 from ..exceptions import InstagramMCPError
+from ..metrics import MetricsCollector
 
 if TYPE_CHECKING:
     from ..client import InstagramClient
@@ -159,4 +160,15 @@ __all__ = [
     "_tool_error",
     "_exception_to_tool_error",
     "_paginate_feed",
+    "record_tool_call",
 ]
+
+
+def record_tool_call(tool_name: str, elapsed: float, error: Optional[str] = None) -> None:
+    """Record a tool call's duration and optional error to the MetricsCollector.
+
+    Call this after each tool execution completes (tools already measure elapsed
+    time via ``time.perf_counter()``). This wires the existing timing into the
+    metrics infrastructure so ``instagram_metrics`` reports real data.
+    """
+    MetricsCollector.get_instance().record_request(tool_name, elapsed, error)

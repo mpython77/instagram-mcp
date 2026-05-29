@@ -2,7 +2,7 @@
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![MCP](https://img.shields.io/badge/MCP-compatible-green) ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey) [![CI](https://github.com/mpython77/instagram-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mpython77/instagram-mcp/actions/workflows/ci.yml) [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/mpython77/instagram-mcp/pkgs/container/instagram-mcp) [![PyPI](https://img.shields.io/badge/PyPI-instamcp-orange)](https://pypi.org/project/instamcp/) [![Smithery](https://img.shields.io/badge/Smithery-kelajak054%2Finstagram--mcp-purple)](https://smithery.ai/servers/kelajak054/instagram-mcp)
 
-Production-grade MCP server for Instagram. **76 tools** — 19 anonymous, 56 authenticated, 1 auto-mode. Built on `curl_cffi` with Chrome TLS impersonation, adaptive rate limiting, smart caching, multi-account pool, and challenge/2FA resolver.
+Production-grade MCP server for Instagram. **79 tools** — 22 anonymous, 56 authenticated, 1 auto-mode. Built on `curl_cffi` with Chrome TLS impersonation, adaptive rate limiting, smart caching, multi-account pool, and challenge/2FA resolver.
 
 Works with **Claude Desktop**, **Claude Code**, and any MCP-compatible AI client.
 
@@ -12,7 +12,7 @@ Works with **Claude Desktop**, **Claude Code**, and any MCP-compatible AI client
 
 | Tier | Symbol | Requirement | Tools |
 |------|--------|-------------|-------|
-| Anonymous | 🌐 | None | 19 |
+| Anonymous | 🌐 | None | 22 |
 | Authenticated | 🔐 | `cookies.json` with valid Instagram session | 56 |
 | Auto-mode | 🌐/🔐 | Anon by default, upgrades when cookies present | 1 |
 
@@ -262,12 +262,20 @@ docker run -d \
 | `instagram_sessions` | Manage multiple accounts via `INSTAGRAM_MCP_COOKIES_<ALIAS>` env vars |
 | `instagram_oauth` | Full Graph API OAuth 2.0 flow (`init_flow`/`exchange_code`/`refresh_token`/`status`) |
 
+### 🌐 Audience Intelligence
+
+| Tool | Description |
+|------|-------------|
+| `instagram_best_time_to_post` | Analyze post timestamps to find optimal posting times (UTC hours/days) |
+
 ### 🌐 Batch & Server
 
 | Tool | Description |
 |------|-------------|
 | `instagram_batch_scrape` | Scrape up to 2000 profiles; `profile_only=True` gives 30–60× speedup |
 | `instagram_server` | Diagnostics and cache management (`status`/`clear_cache`/`clear_user`/`reload_cookies`) |
+| `instagram_metrics` | View or reset request metrics (counts, durations, error rates, cache stats) |
+| `instagram_plugins` | List loaded third-party plugins |
 | `instagram_submit_verification_code` | Submit SMS/Email/2FA code to resolve a pending checkpoint and restore the session |
 
 ---
@@ -386,11 +394,19 @@ Each tool declares MCP-standard annotation hints so hosts can render them with t
 | `instagram_schedule` | ✗ | ✗ | ✗ | ✗ |
 | `instagram_sessions` | ✗ | ✗ | ✗ | ✗ |
 
+### audience
+
+| Tool | readOnly | idempotent | destructive | openWorld |
+|------|:---:|:---:|:---:|:---:|
+| `instagram_best_time_to_post` | ✓ | ✓ | ✗ | ✓ |
+
 ### server
 
 | Tool | readOnly | idempotent | destructive | openWorld |
 |------|:---:|:---:|:---:|:---:|
 | `instagram_server` | ✓ | ✓ | ✗ | ✗ |
+| `instagram_metrics` | ✓ | ✓ | ✗ | ✗ |
+| `instagram_plugins` | ✓ | ✓ | ✗ | ✗ |
 
 ---
 
@@ -466,7 +482,7 @@ The hooks run automatically on `git commit`. See `SECURITY.md` for the full secr
 ## FAQ
 
 **Do I need to log in?**  
-No. 19 tools work anonymously with no credentials. 56 tools require `cookies.json`. `instagram_hashtag` auto-switches based on whether cookies are present.
+No. 22 tools work anonymously with no credentials. 56 tools require `cookies.json`. `instagram_hashtag` auto-switches based on whether cookies are present.
 
 **Why `curl_cffi` instead of `requests`?**  
 Instagram blocks `requests` and `aiohttp` at the TLS handshake level by JA3/JA4 fingerprint. `curl_cffi` impersonates Chrome's TLS stack, bypassing this check.

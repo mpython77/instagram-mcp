@@ -140,6 +140,7 @@ def test_server_registrar_failure_is_logged_in_degraded_mode(monkeypatch, caplog
         "dm": lambda *a, **kw: [],
         "upload": lambda *a, **kw: [],
         "automation": lambda *a, **kw: [],
+        "audience": lambda *a, **kw: [],
         "server": lambda *a, **kw: (_ for _ in ()).throw(boom),
     }
     monkeypatch.setattr("instagram_mcp.tools._REGISTRARS", fake_registrars)

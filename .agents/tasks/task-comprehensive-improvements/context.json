@@ -1,0 +1,32 @@
+{
+  "project_type": "Python MCP server for Instagram (76 tools), async, production-grade",
+  "language": "Python 3.10+",
+  "build_system": "setuptools via pyproject.toml. pip install -e '.[dev]' for dev setup",
+  "test_framework": "pytest with pytest-asyncio (asyncio_mode=auto). Tests in tests/. conftest.py mocks mcp.server.fastmcp modules since curl_cffi may not be fully available. Tests ignore tests/test_upload.py, tests/test_new_tools.py, tests/test_final_push.py in CI.",
+  "build_command": "pip install -e '.[dev]'",
+  "test_command": "pytest tests/ -v --tb=short --ignore=tests/test_upload.py --ignore=tests/test_new_tools.py --ignore=tests/test_final_push.py",
+  "verification_instructions": "1. pip install -e '.[dev]' 2. pytest tests/ --ignore=tests/test_upload.py --ignore=tests/test_new_tools.py --ignore=tests/test_final_push.py",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "pip install -e '.[dev]'",
+  "environment_constraints": "OPEN_INTERNET network. Python 3.11 default. curl_cffi import is mocked in tests via conftest.py.",
+  "contribution_requirements": "Keep backwards compat for all imports. Existing tests must pass. Follow existing code style (docstrings, type hints, logging patterns). tools/__init__.py CANONICAL_ORDER and _REGISTRARS must be updated if new toolsets added.",
+  "key_patterns": "Each toolset in tools/ has a register_<name>(mcp, client, config, exporter) -> list[ToolDescriptor] function. Tools use @mcp.tool decorator inside the register function closure. _helpers.py has sanitize_username, _tool_error, _exception_to_tool_error, ToolDescriptor, AuthTier. Client uses proxy retry pattern with _with_proxy_retry. Monitor uses fetch_fn callback pattern. Exporter uses JsonExporter with save() method.",
+  "relevant_files": [
+    "instagram_mcp/client.py",
+    "instagram_mcp/tools/__init__.py",
+    "instagram_mcp/tools/content.py",
+    "instagram_mcp/tools/profile.py",
+    "instagram_mcp/tools/_helpers.py",
+    "instagram_mcp/monitor.py",
+    "instagram_mcp/exporter.py",
+    "instagram_mcp/delay.py",
+    "instagram_mcp/media_cache.py",
+    "instagram_mcp/__init__.py",
+    "instagram_mcp/config.py",
+    "instagram_mcp/models.py",
+    "tests/conftest.py",
+    "tests/test_monitor.py",
+    "tests/test_exporter.py"
+  ],
+  "directory_structure": "instagram_mcp/ - main package. instagram_mcp/tools/ - per-domain tool registrars. tests/ - pytest tests. scripts/ - utility scripts. .github/workflows/ - CI."
+}

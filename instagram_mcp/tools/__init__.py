@@ -28,6 +28,7 @@ from . import (
     dm,
     upload,
     automation,
+    audience,
     server as server_module,  # avoid shadowing the `mcp` server arg
 )
 from ._helpers import (
@@ -80,6 +81,7 @@ CANONICAL_ORDER: tuple[str, ...] = (
     "dm",
     "upload",
     "automation",
+    "audience",
     "server",
 )
 
@@ -93,6 +95,7 @@ _REGISTRARS = {
     "dm":           dm.register_dm,
     "upload":       upload.register_upload,
     "automation":   automation.register_automation,
+    "audience":     audience.register_audience,
     "server":       server_module.register_server,
 }
 
