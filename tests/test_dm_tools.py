@@ -246,3 +246,89 @@ async def test_send_dm_too_long():
         await client.send_dm_text("thread123", "x" * 1001)
 
     await client.close()
+
+
+
+# ── Newly wired DM tools: mute / share_post / media_messages ──────────────────
+
+from instagram_mcp.models import (
+    DMMediaMessagesInput,
+    DMMuteInput,
+    DMSharePostInput,
+)
+
+
+class TestNewDMInputModels:
+    def test_mute_defaults(self):
+        inp = DMMuteInput(thread_id="tid123")
+        assert inp.thread_id == "tid123"
+        assert inp.mute is True
+
+    def test_mute_unmute(self):
+        inp = DMMuteInput(thread_id="tid123", mute=False)
+        assert inp.mute is False
+
+    def test_mute_requires_thread_id(self):
+        with pytest.raises(Exception):
+            DMMuteInput(thread_id="")
+
+    def test_share_post_required(self):
+        inp = DMSharePostInput(media_id="123", username="nike")
+        assert inp.media_id == "123"
+        assert inp.username == "nike"
+        assert inp.text == ""
+
+    def test_share_post_requires_media_id(self):
+        with pytest.raises(Exception):
+            DMSharePostInput(media_id="", thread_id="tid")
+
+    def test_media_messages_defaults(self):
+        inp = DMMediaMessagesInput(thread_id="tid123")
+        assert inp.thread_id == "tid123"
+        assert inp.limit == 50
+
+    def test_media_messages_limit_bounds(self):
+        with pytest.raises(Exception):
+            DMMediaMessagesInput(thread_id="tid123", limit=0)
+        with pytest.raises(Exception):
+            DMMediaMessagesInput(thread_id="tid123", limit=201)
+
+
+def _client_without_auth():
+    from instagram_mcp.client import InstagramClient
+    from instagram_mcp.config import MCPConfig
+    from instagram_mcp.cache import SmartCache
+    from instagram_mcp.proxy_manager import ProxyManager
+    from instagram_mcp.rate_limiter import AdaptiveRateLimiter
+
+    return InstagramClient(
+        config=MCPConfig(),
+        proxy_manager=ProxyManager(),
+        rate_limiter=AdaptiveRateLimiter(),
+        cache=SmartCache(),
+        cookie_manager=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_dm_mute_no_auth():
+    client = _client_without_auth()
+    with pytest.raises(FetchError, match="authentication"):
+        await client.dm_mute("thread123")
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_dm_share_post_no_auth():
+    client = _client_without_auth()
+    with pytest.raises(FetchError, match="authentication"):
+        await client.dm_share_post("media123", thread_id="thread123")
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_dm_media_messages_no_auth():
+    client = _client_without_auth()
+    with pytest.raises(FetchError, match="authentication"):
+        await client.dm_media_messages("thread123")
+    await client.close()

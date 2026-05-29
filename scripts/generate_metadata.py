@@ -189,6 +189,9 @@ _DESCRIPTIONS: dict[str, str] = {
     "instagram_dm_react": "Add or remove an emoji reaction on a DM message. (AUTH)",
     "instagram_dm_unsend": "Delete a sent DM message. (AUTH)",
     "instagram_dm_mark_seen": "Mark a DM thread as seen. (AUTH)",
+    "instagram_dm_mute": "Mute or unmute a DM thread. (AUTH)",
+    "instagram_dm_share_post": "Share an Instagram post into a DM thread or to a user. (AUTH)",
+    "instagram_dm_media_messages": "List media messages (photos, videos, shared posts) in a DM thread. (AUTH)",
     # upload
     "instagram_upload_photo": "Upload 1–10 images as a post or carousel. (AUTH)",
     "instagram_upload_reel": "Upload an MP4 as a Reel. (AUTH)",

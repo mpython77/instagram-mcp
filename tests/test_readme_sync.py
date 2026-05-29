@@ -105,14 +105,7 @@ def test_no_phantom_tools_in_readme(inventory) -> None:
     runtime_names = {d["name"] for d in inventory}
     referenced = {m.group(1) for m in re.finditer(r"`(instagram_[a-z0-9_]+)`", TEXT)}
     phantoms = referenced - runtime_names
-    # Allow legacy aliases that historically appeared in README prose.
-    LEGACY_ALLOWED = {
-        "instagram_dm_media_messages",
-        "instagram_dm_mute",
-        "instagram_dm_share_post",
-    }
-    real_phantoms = phantoms - LEGACY_ALLOWED
-    assert not real_phantoms, f"README references unknown tools: {real_phantoms}"
+    assert not phantoms, f"README references unknown tools: {phantoms}"
 
 
 # ---------------------------------------------------------------------------

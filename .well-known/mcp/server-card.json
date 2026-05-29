@@ -1,7 +1,7 @@
 {
   "name": "instagram-mcp",
   "version": "2.1.2",
-  "description": "Production-grade MCP server for Instagram. 79 tools — 22 anonymous (no credentials), 56 authenticated, 1 auto-mode. Profile scraping, engagement analytics, DM inbox/send, hashtag research, stories, reels, uploads, social actions (like, follow, comment, block), batch scraping up to 2000 profiles, post scheduling, account monitoring, multi-account sessions, OAuth support, comment sentiment analysis (EN/UZ/RU), multi-account pool with auto-failover, and challenge/2FA resolver. Built on curl_cffi with Chrome TLS impersonation, adaptive rate limiting, and smart caching.",
+  "description": "Production-grade MCP server for Instagram. 82 tools — 22 anonymous (no credentials), 59 authenticated, 1 auto-mode. Profile scraping, engagement analytics, DM inbox/send, hashtag research, stories, reels, uploads, social actions (like, follow, comment, block), batch scraping up to 2000 profiles, post scheduling, account monitoring, multi-account sessions, OAuth support, comment sentiment analysis (EN/UZ/RU), multi-account pool with auto-failover, and challenge/2FA resolver. Built on curl_cffi with Chrome TLS impersonation, adaptive rate limiting, and smart caching.",
   "tools": [
     {
       "name": "instagram_profile",
@@ -804,6 +804,42 @@
         "readOnlyHint": false,
         "idempotentHint": false,
         "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "instagram_dm_mute",
+      "title": "Instagram DM Mute",
+      "auth_tier": "auth",
+      "toolset": "dm",
+      "annotations": {
+        "readOnlyHint": false,
+        "idempotentHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "instagram_dm_share_post",
+      "title": "Instagram DM Share Post",
+      "auth_tier": "auth",
+      "toolset": "dm",
+      "annotations": {
+        "readOnlyHint": false,
+        "idempotentHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "instagram_dm_media_messages",
+      "title": "Instagram DM Media Messages",
+      "auth_tier": "auth",
+      "toolset": "dm",
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "destructiveHint": false,
         "openWorldHint": false
       }
     },
