@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "refactor",
   "description": "Split client.py (6532 lines) into an instagram_mcp/client/ package with logical sub-modules. Maintain full backwards compatibility so 'from instagram_mcp.client import InstagramClient' still works.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create directory instagram_mcp/client/",
     "Create instagram_mcp/client/_base.py: Move the InstagramClient class definition, __init__, properties (config, cache, proxy_manager, rate_limiter, cookie_manager, account_pool, media_cache), close(), close_sessions(), _decode_cookie_value(), _cookie_str(). Keep all imports needed. The class will use mixin pattern: inherit from all sub-modules' mixin classes.",
@@ -31,5 +31,5 @@
     "pytest tests/ -v --tb=short --ignore=tests/test_upload.py --ignore=tests/test_new_tools.py --ignore=tests/test_final_push.py"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Successfully split 6531-line client.py into 12 mixin files in instagram_mcp/client/ package. Key implementation notes: (1) Relative imports inside method bodies needed updating from single-dot to double-dot (e.g., from .models to from ..models) since methods are now one level deeper. (2) Test patching of instagram_mcp.client.JitterAsyncSession required a _get_jitter_session_cls() helper in _sessions.py that looks up the class from the package module at runtime. (3) CURL_CFFI_AVAILABLE check in __init__ uses sys.modules lookup to support test overriding at the package level. (4) _caption_insights function is duplicated in both _base.py (for backward-compat export) and _content.py (for actual usage in caption_analyze method). All 779 tests pass."
 }
