@@ -411,7 +411,7 @@ class SocialMixin:
                         "follower_count_text": u.get("social_context", ""),
                         "social_context_type": ctx_type,
                         "you_follow_them":     fs.get("following", False),
-                        "they_follow_you":     fs.get("incoming_request", False),
+                        "they_follow_you":     fs.get("followed_by", False),
                         "follow_request_sent": fs.get("outgoing_request", False),
                         "is_bestie":           fs.get("is_bestie", False),
                         "is_restricted":       fs.get("is_restricted", False),

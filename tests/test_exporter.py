@@ -288,3 +288,49 @@ class TestMakePath:
         now = datetime(2026, 5, 15, tzinfo=timezone.utc)
         path = exporter._make_path("profile", "cristiano", now)
         assert "cristiano" in path.name
+
+
+
+# ── Regression: _make_summary must use the serialized dataclass field names ───
+# data["post"] is asdict(PostInfo) -> fields are `likes`/`comments` (not
+# like_count/comment_count); data["comments"] items are asdict(CommentItem) ->
+# field is `comment_like_count` (not like_count). Before the fix these summaries
+# always reported 0 and the top-comments sort was a no-op.
+
+from instagram_mcp.exporter import _make_summary
+
+
+def test_make_summary_post_uses_likes_comments():
+    data = {
+        "post": {
+            "shortcode": "ABC",
+            "post_url": "https://instagram.com/p/ABC/",
+            "username": "nike",
+            "post_type": "photo",
+            "taken_at_str": "2026-01-01",
+            "likes": 1234,
+            "comments": 56,
+            "location": {},
+        }
+    }
+    s = _make_summary("post", data)
+    assert s["likes"] == 1234
+    assert s["comments"] == 56
+    assert s["author"] == "nike"
+
+
+def test_make_summary_comments_uses_comment_like_count():
+    data = {
+        "shortcode": "ABC",
+        "comment_count": 3,
+        "comments": [
+            {"username": "a", "text": "low", "comment_like_count": 1, "is_caption": False},
+            {"username": "b", "text": "high", "comment_like_count": 99, "is_caption": False},
+            {"username": "c", "text": "mid", "comment_like_count": 10, "is_caption": False},
+        ],
+    }
+    s = _make_summary("comments", data)
+    top = s["top_comments"]
+    # Sorted by comment_like_count desc, and the reported likes are non-zero.
+    assert [c["likes"] for c in top] == [99, 10, 1]
+    assert top[0]["author"] == "b"

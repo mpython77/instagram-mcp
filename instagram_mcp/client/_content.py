@@ -139,7 +139,7 @@ class ContentMixin:
                 "Tagged @%s: %d edges, has_next=%s cursor=%s",
                 username, len(edges),
                 page_info.get("has_next_page"),
-                page_info.get("end_cursor", "")[:20],
+                (page_info.get("end_cursor") or "")[:20],
             )
             return {
                 "edges": edges,
@@ -474,7 +474,7 @@ class ContentMixin:
                 "Reels @%s: %d edges, has_next=%s cursor=%s",
                 username, len(edges),
                 page_info.get("has_next_page"),
-                page_info.get("end_cursor", "")[:20],
+                (page_info.get("end_cursor") or "")[:20],
             )
             return {
                 "edges": edges,
