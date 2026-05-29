@@ -1,13 +1,13 @@
 name: instagram-mcp
 version: "2.1.2"
-description: >
-  Production-grade MCP server for Instagram. 79 tools — 30 anonymous (no credentials),
-  48 authenticated, 1 auto-mode. Profile scraping, engagement analytics, DM inbox/send,
-  hashtag research, stories, reels, uploads, social actions (like, follow, comment,
-  block), batch scraping up to 2000 profiles, post scheduling, account monitoring,
-  multi-account sessions, OAuth support, comment sentiment analysis (EN/UZ/RU),
-  multi-account pool with auto-failover, and challenge/2FA resolver. Built on
-  curl_cffi with Chrome TLS impersonation, adaptive rate limiting, and smart caching.
+description: >-
+  Production-grade MCP server for Instagram. 79 tools — 22 anonymous (no credentials), 56
+  authenticated, 1 auto-mode. Profile scraping, engagement analytics, DM inbox/send, hashtag
+  research, stories, reels, uploads, social actions (like, follow, comment, block), batch
+  scraping up to 2000 profiles, post scheduling, account monitoring, multi-account sessions,
+  OAuth support, comment sentiment analysis (EN/UZ/RU), multi-account pool with auto-failover,
+  and challenge/2FA resolver. Built on curl_cffi with Chrome TLS impersonation, adaptive rate
+  limiting, and smart caching.
 
 startCommand:
   type: stdio
@@ -20,7 +20,7 @@ startCommand:
           Path to your exported Instagram cookies file (cookies.json from
           Cookie-Editor or cookies.txt in Netscape format). Required only for
           authenticated tools (DMs, likes, follow, upload, stories, etc.).
-          Leave empty to use only the 28 anonymous tools.
+          Leave empty to use only the 22 anonymous tools.
         default: ""
       proxies:
         type: string
@@ -54,190 +54,170 @@ startCommand:
     }
 
 tools:
-  # ── Profile & Feed (anonymous) ───────────────────────────────────────────────
+  # profile
   - name: instagram_profile
-    description: Profile metadata, follower/following counts, bio, recent feed tags, activity status.
+    description: "Profile metadata, follower/following counts, bio, recent feed tags, activity status."
   - name: instagram_feed_deep
-    description: Paginated feed analysis up to 200 posts with date filtering and content breakdown.
-  - name: instagram_bulk_check
-    description: Fetch up to 20 accounts in parallel with status for each.
+    description: "Paginated feed analysis up to 200 posts with date filtering and content breakdown."
   - name: instagram_compare_profiles
-    description: Side-by-side comparison table for 2–5 accounts.
-
-  # ── Analysis (anonymous) ─────────────────────────────────────────────────────
-  - name: instagram_analyze_engagement
-    description: Engagement rate %, content mix, best posting days, top hashtags across up to 200 posts.
-  - name: instagram_find_collab_network
-    description: Map usertags, @mentions, co-authors, and paid sponsors across recent posts.
-  - name: instagram_account_report
-    description: Full profile + engagement analytics + collab network in one call.
-  - name: instagram_caption_analyze
-    description: Caption patterns — avg length, hashtag density, emoji rates, CTA frequency.
-  - name: instagram_compare_followers
-    description: Compare follower/following sets between two accounts — find unfollowers or non-mutuals.
-
-  # ── Content (anonymous) ──────────────────────────────────────────────────────
-  - name: instagram_post
-    description: Full post details — location (GPS + Maps link), music, usertags, coauthors, exact timestamp.
-  - name: instagram_post_bulk
-    description: Fetch up to 50 posts in parallel by shortcode or URL.
-  - name: instagram_post_comments
-    description: Fetch comments with likes and thread structure (up to 500).
-
-  # ── Hashtag & Discovery (anonymous / auto-mode) ──────────────────────────────
-  - name: instagram_hashtag
-    description: Top posts for a hashtag. Anon → 12 posts; authenticated → up to 300. Auto-upgrades.
-  - name: instagram_hashtag_deep
-    description: Top accounts, content breakdown, best posting hour across up to 500 hashtag posts.
-  - name: instagram_niche_top
-    description: Account leaderboard for a hashtag ranked by engagement, post count, or total likes.
-  - name: instagram_hashtag_suggest
-    description: Related hashtag suggestions by analyzing top posts under a seed tag.
-
-  # ── Threads (anonymous) ──────────────────────────────────────────────────────
+    description: "Side-by-side comparison table for 2–5 accounts."
+  - name: instagram_bulk_check
+    description: "Fetch up to 20 accounts in parallel with status for each."
   - name: instagram_threads_profile
-    description: Profile metadata from Threads (threads.net) — followers, bio, verification.
+    description: "Profile metadata from Threads (threads.net) — followers, bio, verification."
   - name: instagram_threads_posts
-    description: Recent posts for a Threads user.
-
-  # ── Batch & Server (anonymous) ───────────────────────────────────────────────
-  - name: instagram_batch_scrape
-    description: Scrape up to 2000 profiles. profile_only=True gives 30–60× speedup for bulk bio/follower scraping.
-  - name: instagram_server
-    description: Diagnostics and cache management — status, clear_cache, clear_user, reload_cookies.
-
-  # ── Authenticated Feed & Activity ────────────────────────────────────────────
-  - name: instagram_home_feed
-    description: Your authenticated home feed. (AUTH)
-  - name: instagram_saved_posts
-    description: Your bookmarked posts. (AUTH)
-  - name: instagram_liked_posts
-    description: Posts you have liked. (AUTH)
-  - name: instagram_activity_feed
-    description: Your recent activity notifications. (AUTH)
-  - name: instagram_post_likers
-    description: Users who liked a specific post (up to ~98). (AUTH)
-
-  # ── Authenticated Discovery ───────────────────────────────────────────────────
-  - name: instagram_similar_accounts
-    description: Accounts Instagram considers similar via internal chaining API. (AUTH)
-  - name: instagram_search
-    description: Search users and hashtags by keyword. (AUTH)
-  - name: instagram_user_search
-    description: User search with higher-quality ranking via authenticated API. (AUTH)
-  - name: instagram_user_id_lookup
-    description: Look up a user's numeric ID by username. (AUTH)
-
-  # ── Social Graph ──────────────────────────────────────────────────────────────
-  - name: instagram_followers_list
-    description: Recent followers with mutual follow status. (AUTH)
-  - name: instagram_following_list
-    description: Full following list with close-friends detection. (AUTH)
-  - name: instagram_user_followers
-    description: Paginated followers for any user by numeric user_id. (AUTH)
-  - name: instagram_user_following
-    description: Paginated following for any user by numeric user_id. (AUTH)
-  - name: instagram_tagged_by
-    description: Posts by other accounts that tag this account. (AUTH)
-  - name: instagram_reposts
-    description: Content this account actively reposted. (AUTH)
-
-  # ── Media ─────────────────────────────────────────────────────────────────────
-  - name: instagram_reels
-    description: Account's reels with play counts — the only tool that exposes play_count. (AUTH)
-  - name: instagram_stories
-    description: Currently active stories (cached 2 min). (AUTH)
-  - name: instagram_highlights
-    description: Highlights tray + optional story items inside. (AUTH)
-  - name: instagram_audio_reels
-    description: Reels using a specific audio track by audio_cluster_id. (AUTH)
-  - name: instagram_location_posts
-    description: Top posts at a location by Instagram location ID or name. (AUTH)
-  - name: instagram_media_insights
-    description: Impressions, reach, saves for your own posts (Business/Creator accounts only). (AUTH)
-
-  # ── Interactions ─────────────────────────────────────────────────────────────
-  - name: instagram_post_like
-    description: Like or unlike a post. (AUTH)
-  - name: instagram_post_save
-    description: Save or unsave (bookmark) a post. (AUTH)
-  - name: instagram_post_comment
-    description: Post a comment. (AUTH)
-  - name: instagram_comment_reply
-    description: Reply to a specific comment. (AUTH)
-  - name: instagram_comment_like
-    description: Like or unlike a comment. (AUTH)
-  - name: instagram_comment_hide
-    description: Hide a comment on your own post. (AUTH)
-  - name: instagram_delete_comment
-    description: Delete a comment. (AUTH)
-  - name: instagram_toggle_comments
-    description: Disable or enable comments on your post. (AUTH)
-  - name: instagram_post_delete
-    description: Delete one of your own posts. (AUTH)
-  - name: instagram_follow_user
-    description: Follow or unfollow a user. (AUTH)
-  - name: instagram_block_user
-    description: Block or unblock a user. (AUTH)
-  - name: instagram_account_privacy
-    description: Switch account between public and private. (AUTH)
-  - name: instagram_edit_profile
-    description: Edit bio, display name, website, email, or phone. (AUTH)
-  - name: instagram_publish_story
-    description: Publish a photo as a Story (24h). (AUTH)
-  - name: instagram_story_mark_seen
-    description: Mark stories as viewed. (AUTH)
-  - name: instagram_story_reply
-    description: Reply to a story via DM. (AUTH)
-
-  # ── DM ────────────────────────────────────────────────────────────────────────
-  - name: instagram_dm_inbox
-    description: Read DM inbox — list of threads with last message preview. (AUTH)
-  - name: instagram_dm_thread
-    description: Fetch messages in a specific DM thread with pagination. (AUTH)
-  - name: instagram_dm_send
-    description: Send a text DM to a user or thread. (AUTH)
-  - name: instagram_dm_send_photo
-    description: Send a photo in a DM. (AUTH)
-  - name: instagram_dm_send_video
-    description: Send a video in a DM. (AUTH)
-  - name: instagram_dm_media_messages
-    description: Fetch media messages (photos, videos, reels) in a thread. (AUTH)
-  - name: instagram_dm_react
-    description: Add or remove an emoji reaction on a DM message. (AUTH)
-  - name: instagram_dm_unsend
-    description: Delete a sent DM message. (AUTH)
-  - name: instagram_dm_mute
-    description: Mute or unmute a DM thread. (AUTH)
-  - name: instagram_dm_share_post
-    description: Share a post into a DM thread. (AUTH)
-  - name: instagram_dm_mark_seen
-    description: Mark a DM thread as seen. (AUTH)
-
-  # ── Upload & Download ─────────────────────────────────────────────────────────
-  - name: instagram_upload_photo
-    description: Upload 1–10 images as a post or carousel. (AUTH)
-  - name: instagram_upload_reel
-    description: Upload an MP4 as a Reel. (AUTH)
-  - name: instagram_upload_video
-    description: Upload an MP4 as a regular video post. (AUTH)
-  - name: instagram_download
-    description: Download all media from a post (single/video/carousel) to local disk.
-
-  # ── Broadcast & Automation ────────────────────────────────────────────────────
-  - name: instagram_broadcast_channel
-    description: Read a creator's Broadcast Channel — info or messages. (AUTH)
-  - name: instagram_schedule
-    description: Schedule posts for future publishing — add, list, cancel, status. (AUTH)
-  - name: instagram_monitor
-    description: Poll accounts for new posts and fire webhooks on new content. (AUTH)
-  - name: instagram_sessions
-    description: Manage multiple Instagram accounts via INSTAGRAM_MCP_COOKIES_<ALIAS> env vars.
-  - name: instagram_oauth
-    description: Full Graph API OAuth 2.0 flow — init_flow, exchange_code, refresh_token, status.
-
-  # ── Analysis & Verification ───────────────────────────────────────────────────
+    description: "Recent posts for a Threads user."
+  # analysis
+  - name: instagram_analyze_engagement
+    description: "Engagement rate %, content mix, best posting days, top hashtags across up to 200 posts."
+  - name: instagram_find_collab_network
+    description: "Map usertags, @mentions, co-authors, and paid sponsors across recent posts."
+  - name: instagram_hashtag_suggest
+    description: "Related hashtag suggestions by analyzing top posts under a seed tag."
+  - name: instagram_caption_analyze
+    description: "Caption patterns — avg length, hashtag density, emoji rates, CTA frequency."
+  - name: instagram_account_report
+    description: "Full profile + engagement analytics + collab network in one call."
   - name: instagram_analyze_comments
-    description: Sentiment analysis on post comments — positive/neutral/negative with emoji stats and keywords (EN/UZ/RU). No login required.
+    description: "Sentiment analysis on post comments — positive/neutral/negative with emoji stats and keywords (EN/UZ/RU). No login required."
+  # content
+  - name: instagram_post
+    description: "Full post details — location (GPS + Maps link), music, usertags, coauthors, exact timestamp."
+  - name: instagram_post_comments
+    description: "Fetch comments with likes and thread structure (up to 500)."
+  - name: instagram_hashtag
+    description: "Top posts for a hashtag. Anon: 12 posts; authenticated: up to 300. Auto-upgrades."
+  - name: instagram_hashtag_deep
+    description: "Top accounts, content breakdown, best posting hour across up to 500 hashtag posts."
+  - name: instagram_post_bulk
+    description: "Fetch up to 50 posts in parallel by shortcode or URL."
+  - name: instagram_niche_top
+    description: "Account leaderboard for a hashtag ranked by engagement, post count, or total likes."
+  - name: instagram_stories
+    description: "Currently active stories (cached 2 min). (AUTH)"
+  - name: instagram_highlights
+    description: "Highlights tray + optional story items inside. (AUTH)"
+  - name: instagram_location_posts
+    description: "Top posts at a location by Instagram location ID or name. (AUTH)"
+  - name: instagram_audio_reels
+    description: "Reels using a specific audio track by audio_cluster_id. (AUTH)"
+  - name: instagram_reels
+    description: "Account's reels with play counts — the only tool that exposes play_count. (AUTH)"
+  - name: instagram_tagged_by
+    description: "Posts by other accounts that tag this account. (AUTH)"
+  - name: instagram_reposts
+    description: "Content this account actively reposted. (AUTH)"
+  # social_graph
+  - name: instagram_search
+    description: "Search users and hashtags by keyword. (AUTH)"
+  - name: instagram_followers_list
+    description: "Recent followers with mutual follow status. (AUTH)"
+  - name: instagram_following_list
+    description: "Full following list with close-friends detection. (AUTH)"
+  - name: instagram_post_likers
+    description: "Users who liked a specific post (up to ~98). (AUTH)"
+  - name: instagram_similar_accounts
+    description: "Accounts Instagram considers similar via internal chaining API. (AUTH)"
+  - name: instagram_post_comment
+    description: "Post a comment. (AUTH)"
+  - name: instagram_user_search
+    description: "User search with higher-quality ranking via authenticated API. (AUTH)"
+  - name: instagram_user_followers
+    description: "Paginated followers for any user by numeric user_id. (AUTH)"
+  - name: instagram_user_following
+    description: "Paginated following for any user by numeric user_id. (AUTH)"
+  - name: instagram_story_mark_seen
+    description: "Mark stories as viewed. (AUTH)"
+  - name: instagram_story_reply
+    description: "Reply to a story via DM. (AUTH)"
+  - name: instagram_edit_profile
+    description: "Edit bio, display name, website, email, or phone. (AUTH)"
+  - name: instagram_post_save
+    description: "Save or unsave (bookmark) a post. (AUTH)"
+  - name: instagram_block_user
+    description: "Block or unblock a user. (AUTH)"
+  - name: instagram_post_like
+    description: "Like or unlike a post. (AUTH)"
+  - name: instagram_follow_user
+    description: "Follow or unfollow a user. (AUTH)"
+  - name: instagram_delete_comment
+    description: "Delete a comment. (AUTH)"
+  - name: instagram_publish_story
+    description: "Publish a photo as a Story (24h). (AUTH)"
+  - name: instagram_broadcast_channel
+    description: "Read a creator's Broadcast Channel — info or messages. (AUTH)"
+  - name: instagram_comment_reply
+    description: "Reply to a specific comment. (AUTH)"
+  - name: instagram_comment_like
+    description: "Like or unlike a comment. (AUTH)"
+  - name: instagram_comment_hide
+    description: "Hide a comment on your own post. (AUTH)"
+  - name: instagram_post_delete
+    description: "Delete one of your own posts. (AUTH)"
+  - name: instagram_toggle_comments
+    description: "Disable or enable comments on your post. (AUTH)"
+  - name: instagram_media_insights
+    description: "Impressions, reach, saves for your own posts (Business/Creator accounts only). (AUTH)"
+  - name: instagram_upload_video
+    description: "Upload an MP4 as a regular video post. (AUTH)"
+  - name: instagram_account_privacy
+    description: "Switch account between public and private. (AUTH)"
+  - name: instagram_home_feed
+    description: "Your authenticated home feed. (AUTH)"
+  - name: instagram_saved_posts
+    description: "Your bookmarked posts. (AUTH)"
+  - name: instagram_liked_posts
+    description: "Posts you have liked. (AUTH)"
+  - name: instagram_activity_feed
+    description: "Your recent activity notifications. (AUTH)"
+  - name: instagram_compare_followers
+    description: "Compare follower/following sets between two accounts — find unfollowers or non-mutuals."
+  - name: instagram_user_id_lookup
+    description: "Look up a user's numeric ID by username. (AUTH)"
   - name: instagram_submit_verification_code
-    description: Submit SMS/Email/2FA code to resolve a pending Instagram checkpoint challenge and restore the account session. (AUTH)
+    description: "Submit SMS/Email/2FA code to resolve a pending Instagram checkpoint challenge and restore the account session. (AUTH)"
+  # dm
+  - name: instagram_dm_inbox
+    description: "Read DM inbox — list of threads with last message preview. (AUTH)"
+  - name: instagram_dm_thread
+    description: "Fetch messages in a specific DM thread with pagination. (AUTH)"
+  - name: instagram_dm_send
+    description: "Send a text DM to a user or thread. (AUTH)"
+  - name: instagram_dm_send_photo
+    description: "Send a photo in a DM. (AUTH)"
+  - name: instagram_dm_send_video
+    description: "Send a video in a DM. (AUTH)"
+  - name: instagram_dm_react
+    description: "Add or remove an emoji reaction on a DM message. (AUTH)"
+  - name: instagram_dm_unsend
+    description: "Delete a sent DM message. (AUTH)"
+  - name: instagram_dm_mark_seen
+    description: "Mark a DM thread as seen. (AUTH)"
+  # upload
+  - name: instagram_upload_photo
+    description: "Upload 1–10 images as a post or carousel. (AUTH)"
+  - name: instagram_upload_reel
+    description: "Upload an MP4 as a Reel. (AUTH)"
+  - name: instagram_download
+    description: "Download all media from a post (single/video/carousel) to local disk."
+  # automation
+  - name: instagram_batch_scrape
+    description: "Scrape up to 2000 profiles. profile_only=True gives 30–60x speedup for bulk bio/follower scraping."
+  - name: instagram_schedule
+    description: "Schedule posts for future publishing — add, list, cancel, status. (AUTH)"
+  - name: instagram_monitor
+    description: "Poll accounts for new posts and fire webhooks on new content. (AUTH)"
+  - name: instagram_sessions
+    description: "Manage multiple Instagram accounts via INSTAGRAM_MCP_COOKIES_<ALIAS> env vars."
+  - name: instagram_oauth
+    description: "Full Graph API OAuth 2.0 flow — init_flow, exchange_code, refresh_token, status."
+  # audience
+  - name: instagram_best_time_to_post
+    description: "Best posting times and weekdays based on historical engagement across up to 200 posts."
+  # server
+  - name: instagram_server
+    description: "Diagnostics and cache management — status, clear_cache, clear_user, reload_cookies."
+  - name: instagram_metrics
+    description: "Server metrics — per-tool request counts, latency, and error rates. Actions: get, reset."
+  - name: instagram_plugins
+    description: "List loaded server plugins and their status."
