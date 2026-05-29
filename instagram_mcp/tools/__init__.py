@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from typing import TYPE_CHECKING
 
 from . import (
     profile,
@@ -59,12 +58,6 @@ from ..parser import (  # noqa: F401  (re-export)
     check_dead_account,
     check_dead_account_from_items,
 )
-
-if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
-    from ..client import InstagramClient
-    from ..config import MCPConfig
-    from ..exporter import JsonExporter
 
 logger = logging.getLogger("instagram_mcp.tools")
 

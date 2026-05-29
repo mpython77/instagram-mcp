@@ -149,7 +149,7 @@ class InstagramClient:
 
         if not session or isinstance(session, MagicMock):
             return data
-        
+
         # Helper to avoid duplicating logic
         async def _cache_val(val: str) -> str:
             if not val or not val.startswith("http"):
@@ -1909,7 +1909,6 @@ class InstagramClient:
                 clips_meta = media.get("clips_metadata") or {}
                 challenge   = clips_meta.get("challenge_info") or {}
                 challenge_title = (challenge.get("challenge") or {}).get("title") or ""
-                branded_content = clips_meta.get("branded_content_tag_info") or {}
                 mashup_count = (clips_meta.get("mashup_info") or {}).get("formatted_mashups_count") or ""
 
                 # Carousel
@@ -1917,7 +1916,6 @@ class InstagramClient:
                 carousel_items = []
                 if mtype == 8:
                     for ci in (media.get("carousel_media") or []):
-                        ci_cap = ci.get("caption") or {}
                         carousel_items.append({
                             "media_type":  ci.get("media_type", 1),
                             "shortcode":   ci.get("code") or ci.get("pk", ""),
@@ -3183,7 +3181,6 @@ class InstagramClient:
     ) -> tuple:
         """Upload one image file, return (upload_id, width, height)."""
         import os as _os
-        import time as _time_mod
 
         if not _os.path.isfile(path):
             raise FetchError(f"Image file not found: {path!r}")
@@ -3416,7 +3413,6 @@ class InstagramClient:
 
         media = body.get("media") or {}
         media_id = str(media.get("pk") or media.get("id") or "")
-        code = str(media.get("code") or "")
 
         return {
             "ok":       True,
@@ -4876,7 +4872,7 @@ class InstagramClient:
         if resp.status_code not in (200, 201):
             raise FetchError(f"comment_reply: HTTP {resp.status_code}: {body_text[:200]}")
         if body_text.lstrip().startswith("<"):
-            raise FetchError(f"comment_reply: got HTML (session blocked)")
+            raise FetchError("comment_reply: got HTML (session blocked)")
         try:
             body = _json.loads(body_text)
         except Exception:
@@ -4924,7 +4920,7 @@ class InstagramClient:
         if resp.status_code not in (200, 201):
             raise FetchError(f"comment_like: HTTP {resp.status_code}: {body_text[:200]}")
         if body_text.lstrip().startswith("<"):
-            raise FetchError(f"comment_like: got HTML (session blocked)")
+            raise FetchError("comment_like: got HTML (session blocked)")
         try:
             body = _json.loads(body_text)
         except Exception:
@@ -4962,7 +4958,7 @@ class InstagramClient:
         if resp.status_code not in (200, 201):
             raise FetchError(f"comment_hide: HTTP {resp.status_code}: {body_text[:200]}")
         if body_text.lstrip().startswith("<"):
-            raise FetchError(f"comment_hide: got HTML (session blocked)")
+            raise FetchError("comment_hide: got HTML (session blocked)")
         try:
             body = _json.loads(body_text)
         except Exception:
@@ -4976,15 +4972,12 @@ class InstagramClient:
     async def post_delete(self, media_id: str) -> Dict[str, Any]:
         """Permanently delete one of your own Instagram posts."""
         _, session, csrf = await self._require_auth("post_delete")
-        # Fetch media info to determine media_type
-        media_type = "1"
+        # Probe media info before deletion (best-effort; result is not required).
         try:
-            info_body = await self._auth_get(
+            await self._auth_get(
                 f"https://www.instagram.com/api/v1/media/{media_id}/info/",
                 {}, csrf, session, "post_delete_info",
             )
-            items = (info_body.get("items") or [{}])
-            media_type = str((items[0] if items else {}).get("media_type", 1))
         except Exception:
             pass
 
@@ -5026,7 +5019,7 @@ class InstagramClient:
         if resp.status_code not in (200, 201):
             raise FetchError(f"toggle_comments: HTTP {resp.status_code}: {body_text[:200]}")
         if body_text.lstrip().startswith("<"):
-            raise FetchError(f"toggle_comments: got HTML (session blocked)")
+            raise FetchError("toggle_comments: got HTML (session blocked)")
         try:
             body = _json.loads(body_text)
         except Exception:
@@ -5058,7 +5051,7 @@ class InstagramClient:
         if resp.status_code not in (200, 201):
             raise FetchError(f"media_insights: HTTP {resp.status_code}: {body_text[:200]}")
         if body_text.lstrip().startswith("<"):
-            raise FetchError(f"media_insights: got HTML (session blocked)")
+            raise FetchError("media_insights: got HTML (session blocked)")
         try:
             body = _json.loads(body_text)
         except Exception:
@@ -5166,7 +5159,7 @@ class InstagramClient:
         if resp.status_code not in (200, 201):
             raise FetchError(f"account_privacy: HTTP {resp.status_code}: {body_text[:200]}")
         if body_text.lstrip().startswith("<"):
-            raise FetchError(f"account_privacy: got HTML (session blocked)")
+            raise FetchError("account_privacy: got HTML (session blocked)")
         try:
             body = _json.loads(body_text)
         except Exception:
@@ -5358,7 +5351,7 @@ class InstagramClient:
         if resp.status_code not in (200, 201):
             raise FetchError(f"activity_feed: HTTP {resp.status_code}: {body_text[:200]}")
         if body_text.lstrip().startswith("<"):
-            raise FetchError(f"activity_feed: got HTML (session blocked)")
+            raise FetchError("activity_feed: got HTML (session blocked)")
         try:
             body = _json.loads(body_text)
         except Exception:
@@ -5789,7 +5782,7 @@ class InstagramClient:
             if resp.status_code in (200, 201) and not resp.text.lstrip().startswith("<"):
                 break
         if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError(f"edit_profile: redirected to login (session rate-limited)")
+            raise FetchError("edit_profile: redirected to login (session rate-limited)")
         if resp.status_code not in (200, 201):
             raise FetchError(f"edit_profile: HTTP {resp.status_code}: {resp.text[:200]}")
         body_text = resp.text
@@ -5828,7 +5821,7 @@ class InstagramClient:
             allow_redirects=False,
         )
         if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError(f"post_save: redirected to login (session rate-limited)")
+            raise FetchError("post_save: redirected to login (session rate-limited)")
         if resp.status_code not in (200, 201):
             raise FetchError(f"post_save: HTTP {resp.status_code}: {resp.text[:200]}")
         body = resp.text
@@ -5856,7 +5849,7 @@ class InstagramClient:
             allow_redirects=False,
         )
         if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError(f"post_unsave: redirected to login (session rate-limited)")
+            raise FetchError("post_unsave: redirected to login (session rate-limited)")
         if resp.status_code not in (200, 201):
             raise FetchError(f"post_unsave: HTTP {resp.status_code}: {resp.text[:200]}")
         body = resp.text
@@ -5884,7 +5877,7 @@ class InstagramClient:
             allow_redirects=False,
         )
         if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError(f"block_user: redirected to login (session rate-limited)")
+            raise FetchError("block_user: redirected to login (session rate-limited)")
         if resp.status_code not in (200, 201):
             raise FetchError(f"block_user: HTTP {resp.status_code}: {resp.text[:200]}")
         body_text = resp.text
@@ -5921,7 +5914,7 @@ class InstagramClient:
             allow_redirects=False,
         )
         if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError(f"unblock_user: redirected to login (session rate-limited)")
+            raise FetchError("unblock_user: redirected to login (session rate-limited)")
         if resp.status_code not in (200, 201):
             raise FetchError(f"unblock_user: HTTP {resp.status_code}: {resp.text[:200]}")
         body_text = resp.text
@@ -5961,7 +5954,7 @@ class InstagramClient:
             allow_redirects=False,
         )
         if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError(f"like_post: redirected (session rate-limited or expired)")
+            raise FetchError("like_post: redirected (session rate-limited or expired)")
         if resp.status_code not in (200, 201):
             raise FetchError(f"like_post: HTTP {resp.status_code}: {resp.text[:200]}")
         body_text = resp.text
@@ -6000,7 +5993,7 @@ class InstagramClient:
             allow_redirects=False,
         )
         if resp.status_code in (301, 302, 303, 307, 308):
-            raise FetchError(f"follow_user: redirected (session rate-limited or expired)")
+            raise FetchError("follow_user: redirected (session rate-limited or expired)")
         if resp.status_code not in (200, 201):
             raise FetchError(f"follow_user: HTTP {resp.status_code}: {resp.text[:200]}")
         body_text = resp.text
@@ -6224,8 +6217,8 @@ class InstagramClient:
         Returns:
             dict with posts (list), next_max_id, has_more.
         """
-        profile = await self.threads_profile(username)
-        user_id = profile.get("pk", "")
+        # Validate the user exists via the profile endpoint; HTML is re-fetched below.
+        await self.threads_profile(username)
         # We already have the HTML from threads_profile — fetch it again for posts
         import re as _re
 
@@ -6489,7 +6482,7 @@ class InstagramClient:
 
         # Top 3 posts by likes
         top_posts = sorted(
-            [{"caption": c[:200], "like_count": l} for c, l in zip(captions, likes)],
+            [{"caption": c[:200], "like_count": like} for c, like in zip(captions, likes)],
             key=lambda x: -x["like_count"],
         )[:3]
 

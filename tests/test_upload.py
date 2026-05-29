@@ -255,6 +255,10 @@ def _make_client(authenticated: bool = True) -> InstagramClient:
     cfg.max_retries = 3
     cfg.retry_base_delay = 0.0
     cfg.async_max_clients = 10
+    # Path-shaped fields — must be real strings so the ensure_path guard in
+    # AccountPool / MediaCache does not reject a MagicMock at construction time.
+    cfg.accounts_dir = ""
+    cfg.media_cache_dir = ""
 
     cache = MagicMock()
     cache.get_or_fetch = AsyncMock()

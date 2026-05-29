@@ -29,7 +29,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
-from urllib.parse import urlencode, urljoin
+from urllib.parse import urlencode
 
 logger = logging.getLogger("instagram_mcp.oauth")
 
@@ -82,7 +82,7 @@ class OAuthManager:
         )
         if not app_id or not app_secret:
             return None
-        
+
         # Use a hidden .state directory to avoid leaking tokens in exports/
         state_dir = os.path.join(os.getcwd(), ".state")
         os.makedirs(state_dir, exist_ok=True)

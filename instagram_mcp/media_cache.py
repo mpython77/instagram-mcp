@@ -1,11 +1,9 @@
-import os
 import hashlib
 import logging
 import anyio
 from pathlib import Path
 from typing import Optional
 from curl_cffi.requests import AsyncSession
-from .exceptions import FetchError
 from ._path_guard import ensure_path
 
 logger = logging.getLogger("instagram_mcp.media_cache")
@@ -31,7 +29,7 @@ class MediaCache:
             ext = ".mp4"
         elif ".webp" in url.lower():
             ext = ".webp"
-            
+
         # Create a unique hash of the URL
         hasher = hashlib.sha256()
         hasher.update(url.encode("utf-8"))

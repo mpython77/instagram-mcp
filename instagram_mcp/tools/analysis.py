@@ -361,13 +361,13 @@ def register_analysis(
             ]
             tiers = data["tiers"]
             if tiers["mega_10M_plus"]:
-                lines.append(f"**Mega (10M+ posts):** " + " ".join(f"#{t}" for t in tiers["mega_10M_plus"]))
+                lines.append("**Mega (10M+ posts):** " + " ".join(f"#{t}" for t in tiers["mega_10M_plus"]))
             if tiers["macro_1M_10M"]:
-                lines.append(f"**Macro (1M–10M):** " + " ".join(f"#{t}" for t in tiers["macro_1M_10M"]))
+                lines.append("**Macro (1M–10M):** " + " ".join(f"#{t}" for t in tiers["macro_1M_10M"]))
             if tiers["mid_100k_1M"]:
-                lines.append(f"**Mid (100K–1M):** " + " ".join(f"#{t}" for t in tiers["mid_100k_1M"]))
+                lines.append("**Mid (100K–1M):** " + " ".join(f"#{t}" for t in tiers["mid_100k_1M"]))
             if tiers["micro_under_100k"]:
-                lines.append(f"**Micro (<100K):** " + " ".join(f"#{t}" for t in tiers["micro_under_100k"]))
+                lines.append("**Micro (<100K):** " + " ".join(f"#{t}" for t in tiers["micro_under_100k"]))
             lines += [
                 "",
                 f"**Copy-paste ({len(data['balanced_set'])} hashtags):**",

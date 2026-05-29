@@ -1890,7 +1890,7 @@ def register_social_graph(
             await ctx.report_progress(0, 2, "Fetching follower/following lists...")
             data = await client.compare_followers(params.analysis_type, params.max_users)
             await ctx.report_progress(2, 2, "Done")
-            lines = [f"## Follower Comparison\n"]
+            lines = ["## Follower Comparison\n"]
             if "unfollower_count" in data:
                 ids = data.get("unfollowers", [])
                 lines.append(f"### Unfollowers ({data['unfollower_count']})")

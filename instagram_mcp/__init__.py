@@ -31,7 +31,6 @@ import asyncio
 import contextlib
 import json
 import logging
-from dataclasses import asdict
 
 __version__ = "2.1.2"
 
@@ -150,7 +149,6 @@ def create_mcp_server():
 
         # ── Account Monitor ───────────────────────────────────────────────────
         from .monitor import AccountMonitor
-        from .parser import parse_feed_items
 
         async def _monitor_fetch(username: str, max_posts: int):
             user = await client.fetch_user(username)
@@ -717,8 +715,10 @@ def run_server() -> None:
 
 
 # Public exports
-from .batch_runner import BatchConfig, BatchRunner, BatchStats
-from .agents import (
+# NOTE: imported at module end to avoid circular imports (these submodules import
+# from instagram_mcp subpackages during create_mcp_server wiring).
+from .batch_runner import BatchConfig, BatchRunner, BatchStats  # noqa: E402
+from .agents import (  # noqa: E402
     AccountHealthAgent,
     BulkScoringAgent,
     ContentAuditAgent,

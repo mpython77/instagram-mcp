@@ -24,7 +24,7 @@ import os
 import signal
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
@@ -311,7 +311,8 @@ class BatchRunner:
             if writer_task in done and not workers_all_done.done():
                 exc = writer_task.exception()
                 logger.error("Batch writer failed prematurely: %s", exc or "Stopped unexpectedly")
-                if exc: raise exc
+                if exc:
+                    raise exc
                 raise RuntimeError("Batch writer stopped unexpectedly")
 
             # All workers done → push writer sentinel so it stops.

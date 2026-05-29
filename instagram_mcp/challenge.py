@@ -1,9 +1,7 @@
 import re
 import logging
-import asyncio
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from curl_cffi.requests import AsyncSession
-from .exceptions import FetchError
 
 logger = logging.getLogger("instagram_mcp.challenge")
 
@@ -13,10 +11,10 @@ class ChallengeResolver:
 
     @classmethod
     def register_challenge(
-        cls, 
-        alias: str, 
-        challenge_url: str, 
-        session: AsyncSession, 
+        cls,
+        alias: str,
+        challenge_url: str,
+        session: AsyncSession,
         cookies_path: str
     ) -> str:
         """Register a pending challenge for an account, telling the user how to solve it."""
@@ -32,7 +30,7 @@ class ChallengeResolver:
             "path_info": path_info,
             "status": "pending_code"
         }
-        
+
         instructions = (
             f"⚠️ Verification Required (Checkpoint) for account '{alias}'!\n"
             f"Please get the 6-digit verification code from your Email/SMS/2FA and run the tool:\n"
@@ -60,14 +58,14 @@ class ChallengeResolver:
         # https://www.instagram.com/api/v1/challenge/{path_info}/
         # with POST payload: security_code=<code_entered>
         url = f"https://www.instagram.com/api/v1/challenge/{path_info}/"
-        
+
         csrf = session.cookies.get("csrftoken") or ""
         headers = {
             "x-csrftoken": csrf,
             "x-requested-with": "XMLHttpRequest",
             "Referer": challenge["challenge_url"],
         }
-        
+
         payload = {
             "security_code": code
         }
@@ -80,19 +78,16 @@ class ChallengeResolver:
                 len(code), alias, url,
             )
             resp = await session.post(url, data=payload, headers=headers, timeout=20, allow_redirects=False)
-            
+
             if resp.status_code == 200:
                 body = resp.json()
                 if body.get("status") == "ok":
                     # Update cookies in cookies_path!
-                    # Construct cookie dict from session cookies
-                    new_cookies = {c.name: c.value for c in session.cookies}
-                    
                     # Save cookies back to file
                     import json
                     from pathlib import Path
                     p = Path(cookies_path)
-                    
+
                     # Identify if JSON or Netscape format
                     if p.suffix.lower() == ".json":
                         # Format as Cookie-Editor JSON array
@@ -118,11 +113,11 @@ class ChallengeResolver:
                             expires = "0"
                             lines.append(f"{domain}\t{include_sub}\t{path}\t{secure}\t{expires}\t{c.name}\t{c.value}\n")
                         p.write_text("".join(lines))
-                    
+
                     # Remove from pending list
                     cls._pending_challenges.pop(alias, None)
                     logger.info("Challenge solved successfully for '%s'! Cookies updated.", alias)
-                    
+
                     return {
                         "success": True,
                         "message": f"Challenge solved successfully for account '{alias}'! Session restored."

@@ -50,10 +50,7 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest tests/ -v --tb=short --cov=instagram_mcp --cov-report=xml --cov-report=term-missing \
-            --ignore=tests/test_upload.py \
-            --ignore=tests/test_new_tools.py \
-            --ignore=tests/test_final_push.py
+          pytest tests/ -v --tb=short --cov=instagram_mcp --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage
         if: matrix.python-version == '3.11'
@@ -72,6 +69,6 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install ruff
-        run: pip install ruff
+        run: pip install ruff==0.15.15
       - name: Lint with ruff
-        run: ruff check instagram_mcp/ --select=E,W,F --ignore=E501,W503
+        run: ruff check instagram_mcp/

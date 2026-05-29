@@ -160,7 +160,7 @@ def format_profile_markdown(p: InstagramProfile) -> str:
     if p.user_id:
         lines.append(f"\n🆔 **User ID**: `{p.user_id}`")
 
-    return "\n".join(l for l in lines if l is not None)
+    return "\n".join(line for line in lines if line is not None)
 
 
 def format_profile_json(p: InstagramProfile) -> Dict[str, Any]:
@@ -359,7 +359,7 @@ def format_bulk_results_markdown(results: List[Dict[str, Any]]) -> str:
     total = len(results)
 
     lines = [
-        f"## 📊 Bulk Profile Results",
+        "## 📊 Bulk Profile Results",
         f"**{found}/{total}** accounts found",
         "",
         "| # | Username | Followers | Category | Status |",
@@ -546,7 +546,7 @@ def format_deep_feed_markdown(
     stats_lines = [
         f"- **Posts analyzed**: {feed_result.posts_checked}",
         f"- **Pages fetched**: {feed_result.pages_fetched}",
-        f"- **Pinned posts**: {pinned_count} 📌" if pinned_count else f"- **Pinned posts**: 0",
+        f"- **Pinned posts**: {pinned_count} 📌" if pinned_count else "- **Pinned posts**: 0",
         f"- **Posts with tags**: {feed_result.posts_with_tags}",
         f"- **Unique tags found**: {len(feed_result.tags)}",
     ]
@@ -939,7 +939,7 @@ def format_tagged_by_markdown(
         f"## 🔐 Tagged-By Feed — @{profile.username}",
         "",
         f"Posts made **by other accounts** that tagged **@{profile.username}**.",
-        f"Fetched via authenticated session (Tagged Tab endpoint).",
+        "Fetched via authenticated session (Tagged Tab endpoint).",
         "",
     ]
 
@@ -961,8 +961,8 @@ def format_tagged_by_markdown(
     lines += [
         "### Summary",
         "",
-        f"| Metric | Value |",
-        f"|--------|------:|",
+        "| Metric | Value |",
+        "|--------|------:|",
         f"| Total tagged posts | **{total}** |",
         f"| Unique posters | {unique_posters} |",
         f"| Avg likes per post | {avg_likes:,} |",
@@ -1057,8 +1057,8 @@ def format_reposts_markdown(
         f"## 🔐 Reposts — @{profile.username}",
         "",
         f"Content made **by other accounts** that **@{profile.username}** chose to repost.",
-        f"Each entry represents an active endorsement — the account decided to share "
-        f"this creator's content with their own audience.",
+        "Each entry represents an active endorsement — the account decided to share "
+        "this creator's content with their own audience.",
         "",
     ]
 
@@ -1138,7 +1138,7 @@ def format_reposts_markdown(
     caption_items = [p for p in top_by_likes if p.caption]
     if caption_items:
         lines += [
-            f"### Top Reposts (by original likes) — Caption Snippets",
+            "### Top Reposts (by original likes) — Caption Snippets",
             "",
         ]
         for p in caption_items:
@@ -1176,7 +1176,7 @@ def format_reels_markdown(
         f"## 🔐 Reels — @{profile.username}",
         "",
         f"Reels posted by **@{profile.username}** with play counts.",
-        f"Fetched via authenticated session (Reels Tab endpoint).",
+        "Fetched via authenticated session (Reels Tab endpoint).",
         "",
     ]
 
@@ -1278,8 +1278,8 @@ def format_post_markdown(info: PostInfo) -> str:
 
     # ── Post metadata ─────────────────────────────────────────────────────────
     lines += ["### Post Details", ""]
-    lines.append(f"| Field | Value |")
-    lines.append(f"|-------|-------|")
+    lines.append("| Field | Value |")
+    lines.append("|-------|-------|")
     lines.append(f"| Post | [{info.shortcode}]({info.post_url}) |")
     lines.append(f"| Author | [{author}](https://instagram.com/{info.username}) |")
     lines.append(f"| Type | {type_icon} {info.post_type.capitalize()} |")
@@ -1531,7 +1531,6 @@ def _account_type_icon(at: int) -> str:
 
 def _media_type_label(post: dict) -> str:
     mt = post.get("media_type", 1)
-    pt = post.get("product_type", "")
     if mt == 8:
         count = post.get("carousel_count") or ""
         return f"🎠{count}"
@@ -1598,7 +1597,8 @@ def format_hashtag_markdown(
             date      = (post.get("taken_at_str") or "")[:10] or "—"
             cap_raw   = post.get("caption", "") or ""
             caption   = cap_raw[:50].replace("|", "\\|").replace("\n", " ")
-            if len(cap_raw) > 50: caption += "…"
+            if len(cap_raw) > 50:
+                caption += "…"
             lines.append(
                 f"| {i} | @{username} | {verified} | {acct_icon} | {likes} | {views} | {reposts} | {comments} | {mtype} | "
                 f"{music_cell} | {tag_cell} | {date} | [{code}](https://www.instagram.com/p/{code}/) | {caption} |"
@@ -1622,14 +1622,15 @@ def format_hashtag_markdown(
                 date = "—"
             cap_raw    = post.get("caption") or ""
             caption    = cap_raw[:55].replace("|", "\\|").replace("\n", " ")
-            if len(cap_raw) > 55: caption += "…"
+            if len(cap_raw) > 55:
+                caption += "…"
             lines.append(
                 f"| {i} | @{username} | {verified} | {views} | {mtype} | {date} | "
                 f"[{code}](https://www.instagram.com/p/{code}/) | {caption} |"
             )
 
     if has_more:
-        lines += ["", f"*More posts available — increase `max_posts` to fetch more.*"]
+        lines += ["", "*More posts available — increase `max_posts` to fetch more.*"]
 
     # Auth mode: show aggregate stats
     if is_auth_format and posts:
@@ -1793,7 +1794,7 @@ def format_stories_markdown(
                 expiry_str = f" — expires {_dt.fromtimestamp(expiring_at, tz=_tz.utc).strftime('%Y-%m-%d %H:%M')} UTC"
             except Exception:
                 pass
-        lines.append(f"*No active stories.*")
+        lines.append("*No active stories.*")
         return "\n".join(lines)
 
     expiry_str = ""
@@ -1839,7 +1840,6 @@ def format_stories_markdown(
         polls = item.get("polls") or []
         if polls:
             p = polls[0]
-            q = p.get("question", "") or "Poll"
             tallies = p.get("tallies", [])
             total = sum(t.get("count", 0) for t in tallies)
             poll_cell = f"📊{total}" if total else "📊"
@@ -2468,7 +2468,6 @@ def format_account_report_markdown(
 
 def format_upload_result_markdown(result: Dict[str, Any], image_paths: List[str]) -> str:
     """Format photo upload result."""
-    ok         = result.get("ok", False)
     post_type  = result.get("post_type", "single")
     shortcode  = result.get("shortcode", "")
     url        = result.get("url", "")
@@ -2593,7 +2592,6 @@ def format_dm_thread_markdown(data: dict) -> str:
         username = msg.get("username") or msg.get("user_id", "?")
         ts_str = _ts(msg.get("timestamp", 0))
         is_mine = msg.get("is_mine", False)
-        is_read = msg.get("is_read", False)
         read_by = msg.get("read_by") or []
         itype = msg.get("item_type", "text")
 
@@ -2759,7 +2757,7 @@ def format_monitor_markdown(action: str, data: dict) -> str:
             f"- **Account:** @{data.get('username', '?')}",
             f"- **Webhook:** {data.get('webhook_url', '?')}",
             f"- **Interval:** {data.get('interval_seconds', '?')}s",
-            f"- **Status:** monitoring active",
+            "- **Status:** monitoring active",
         ]
         last = data.get("last_post_shortcode", "")
         if last:
@@ -2910,12 +2908,12 @@ def analyze_comments_sentiment(comments: List[Dict[str, Any]]) -> Dict[str, Any]
     # Lexicon
     pos_words = {
         # English
-        "love", "cool", "great", "nice", "awesome", "perfect", "beautiful", "fire", "best", "like", 
-        "amazing", "wonderful", "cute", "pretty", "sweet", "wow", "slay", "dope", "epic", "legendary", 
-        "goat", "king", "queen", "thank", "thanks", "obsessed", "stunner", "stunning", "gorgeous", 
+        "love", "cool", "great", "nice", "awesome", "perfect", "beautiful", "fire", "best", "like",
+        "amazing", "wonderful", "cute", "pretty", "sweet", "wow", "slay", "dope", "epic", "legendary",
+        "goat", "king", "queen", "thank", "thanks", "obsessed", "stunner", "stunning", "gorgeous",
         "genius", "smart", "helpful", "correct", "true", "yes", "agree", "perfectly",
         # Uzbek
-        "zo'r", "ajoyib", "chiroyli", "rahmat", "super", "yaxshi", "go'zal", "baraka", 
+        "zo'r", "ajoyib", "chiroyli", "rahmat", "super", "yaxshi", "go'zal", "baraka",
         "yashang", "ofarin", "tasanno", "sher", "asal", "shirin", "halol",
         # Russian
         "класс", "круто", "отлично", "красиво", "спасибо", "лучший", "шикарно", "молодец", "супер",
@@ -2926,13 +2924,13 @@ def analyze_comments_sentiment(comments: List[Dict[str, Any]]) -> Dict[str, Any]
     }
     neg_words = {
         # English
-        "hate", "bad", "worst", "slow", "disappointing", "sad", "fail", "fake", "scam", "wrong", 
-        "cringe", "annoying", "terrible", "horrible", "garbage", "trash", "waste", "useless", 
-        "boring", "worse", "dumb", "stupid", "ugly", "poor", "cheap", "disgusting", "ruined", 
-        "ruin", "scammer", "fraud", "liar", "lies", "no", "nope", "disagree", "ridiculous", 
+        "hate", "bad", "worst", "slow", "disappointing", "sad", "fail", "fake", "scam", "wrong",
+        "cringe", "annoying", "terrible", "horrible", "garbage", "trash", "waste", "useless",
+        "boring", "worse", "dumb", "stupid", "ugly", "poor", "cheap", "disgusting", "ruined",
+        "ruin", "scammer", "fraud", "liar", "lies", "no", "nope", "disagree", "ridiculous",
         "nonsense", "idiot",
         # Uzbek
-        "yomon", "xunuk", "aldov", "brak", "past", "qimmat", "aldashdi", "sharmanda", "yo'qol", 
+        "yomon", "xunuk", "aldov", "brak", "past", "qimmat", "aldashdi", "sharmanda", "yo'qol",
         "axlat", "tuhmat", "yolg'on", "yaramas", "iflos",
         # Russian
         "плохо", "ужас", "говно", "обман", "отстой", "лохотрон", "ужасно", "плохой", "дерьмо",
@@ -2941,13 +2939,13 @@ def analyze_comments_sentiment(comments: List[Dict[str, Any]]) -> Dict[str, Any]
     neg_emojis = {
         "😢", "😡", "😠", "👎", "🤮", "💩", "🤡", "😭", "😒", "❌", "💔", "🤨", "🤦", "🙄", "👿"
     }
-    
+
     stopwords = {
         # English
-        "the", "a", "an", "and", "or", "but", "is", "are", "was", "were", "to", "for", "in", "on", 
-        "at", "by", "with", "of", "this", "that", "these", "those", "it", "its", "they", "them", 
-        "their", "you", "your", "me", "my", "we", "our", "he", "him", "his", "she", "her", "i", 
-        "am", "do", "does", "did", "have", "has", "had", "go", "get", "so", "up", "down", "out", 
+        "the", "a", "an", "and", "or", "but", "is", "are", "was", "were", "to", "for", "in", "on",
+        "at", "by", "with", "of", "this", "that", "these", "those", "it", "its", "they", "them",
+        "their", "you", "your", "me", "my", "we", "our", "he", "him", "his", "she", "her", "i",
+        "am", "do", "does", "did", "have", "has", "had", "go", "get", "so", "up", "down", "out",
         "about", "all", "any", "no", "not", "just", "like", "how", "what", "who", "why",
         # Uzbek
         "va", "ammo", "lekin", "balki", "uchun", "bilan", "kabi", "esa", "ham", "u", "bu", "shu",
@@ -2959,65 +2957,65 @@ def analyze_comments_sentiment(comments: List[Dict[str, Any]]) -> Dict[str, Any]
     }
 
     negation_terms = {
-        "not", "no", "never", "none", "neither", "nor", "cannot", "cant", "dont", "doesnt", "didnt", 
+        "not", "no", "never", "none", "neither", "nor", "cannot", "cant", "dont", "doesnt", "didnt",
         "isnt", "arent", "wasnt", "werent", "havent", "hasnt", "hadnt",
         "emas", "yo'q", "yok", "hech",
         "не", "нет", "ни", "без", "нельзя"
     }
 
     results = []
-    
+
     # Trackers
     pos_count = 0
     neg_count = 0
     neu_count = 0
-    
+
     pos_likes = 0
     neg_likes = 0
     neu_likes = 0
-    
+
     pos_replies = 0
     neg_replies = 0
     neu_replies = 0
-    
+
     emoji_counts = _collections.Counter()
     keyword_counts = _collections.Counter()
     pos_keywords = _collections.Counter()
     neg_keywords = _collections.Counter()
-    
+
     # Emojis regex
     emoji_pattern = _re.compile(
         r"[\U00010000-\U0010ffff\u2600-\u27bf]"
     )
-    
+
     for c in comments:
         text = c.get("text", "")
         likes = int(c.get("like_count") or 0)
         replies = int(c.get("child_comment_count") or 0)
-        
+
         # Extract emojis
         emojis = emoji_pattern.findall(text)
         for emoji in emojis:
             emoji_counts[emoji] += 1
-            
+
         # Clean text for word search (support Unicode word chars for Uzbek / Cyrillic)
         words_only = _re.findall(r"\b\w{2,20}\b", text.lower())
-        
+
         # Word counts for keyword cloud
         for w in words_only:
             if w not in stopwords:
                 keyword_counts[w] += 1
-                
+
         # Sentiment logic with negation window of 2 words
         p_matches = 0
         n_matches = 0
-        
+
         for emoji in emojis:
             if emoji in pos_emojis:
                 p_matches += 1
             if emoji in neg_emojis:
                 n_matches += 1
-                
+
         for idx, w in enumerate(words_only):
             is_negated = False
             for prev_idx in range(max(0, idx - 2), idx):
@@ -3028,7 +3026,7 @@ def analyze_comments_sentiment(comments: List[Dict[str, Any]]) -> Dict[str, Any]
             if not is_negated and idx + 1 < len(words_only):
                 if words_only[idx + 1] in negation_terms:
                     is_negated = True
-                    
+
             if w in pos_words:
                 if is_negated:
                     n_matches += 1
@@ -3039,7 +3037,7 @@ def analyze_comments_sentiment(comments: List[Dict[str, Any]]) -> Dict[str, Any]
                     p_matches += 1
                 else:
                     n_matches += 1
-        
+
         if p_matches > n_matches:
             sentiment = "Positive"
             pos_count += 1
@@ -3061,7 +3059,7 @@ def analyze_comments_sentiment(comments: List[Dict[str, Any]]) -> Dict[str, Any]
             neu_count += 1
             neu_likes += likes
             neu_replies += replies
-            
+
         results.append({
             "text": text,
             "username": c.get("user", {}).get("username", "anonymous"),
@@ -3069,7 +3067,7 @@ def analyze_comments_sentiment(comments: List[Dict[str, Any]]) -> Dict[str, Any]
             "replies": replies,
             "sentiment": sentiment
         })
-        
+
     total = len(comments)
     if total > 0:
         pos_pct = (pos_count / total) * 100
@@ -3078,7 +3076,7 @@ def analyze_comments_sentiment(comments: List[Dict[str, Any]]) -> Dict[str, Any]
         score = pos_pct - neg_pct
     else:
         pos_pct = neg_pct = neu_pct = score = 0.0
-        
+
     return {
         "total": total,
         "pos_count": pos_count,
@@ -3109,11 +3107,11 @@ def format_comment_analysis_markdown(shortcode: str, comments: List[Dict[str, An
             f"# Comment Analysis Report — /{shortcode}/\n\n"
             "⚠️ **No comments found or provided for analysis.**"
         )
-        
+
     analysis = analyze_comments_sentiment(comments)
     total = analysis["total"]
     score = analysis["score"]
-    
+
     # Sentiment Verdict
     if score > 40:
         verdict = "Very Positive 🟢"
@@ -3139,7 +3137,7 @@ def format_comment_analysis_markdown(shortcode: str, comments: List[Dict[str, An
             gauge_bar += "🎯"
         else:
             gauge_bar += "▬"
-            
+
     lines = [
         f"# Comment Analysis Report — /{shortcode}/",
         "",
@@ -3168,7 +3166,7 @@ def format_comment_analysis_markdown(shortcode: str, comments: List[Dict[str, An
         "## 🔤 Audience Vocabulary & Emojis",
         ""
     ]
-    
+
     # Top Emojis
     if analysis["top_emojis"]:
         lines += [
@@ -3183,7 +3181,7 @@ def format_comment_analysis_markdown(shortcode: str, comments: List[Dict[str, An
             bar = "🔥" * bar_len if bar_len > 0 else "▪️"
             lines.append(f"| {emoji} | {cnt} | {bar} |")
         lines.append("")
-        
+
     # Keywords
     lines += [
         "### Top Context Keywords",
@@ -3192,17 +3190,17 @@ def format_comment_analysis_markdown(shortcode: str, comments: List[Dict[str, An
         "| Rank | Overall Keywords | Positive Context | Negative Context |",
         "| :---: | :--- | :--- | :--- |"
     ]
-    
+
     top_overall = analysis["top_keywords"]
     top_pos = analysis["top_pos_keywords"]
     top_neg = analysis["top_neg_keywords"]
-    
+
     for idx in range(5):
         w_all = f"`{top_overall[idx][0]}` ({top_overall[idx][1]})" if idx < len(top_overall) else "-"
         w_pos = f"`{top_pos[idx][0]}` ({top_pos[idx][1]})" if idx < len(top_pos) else "-"
         w_neg = f"`{top_neg[idx][0]}` ({top_neg[idx][1]})" if idx < len(top_neg) else "-"
         lines.append(f"| {idx+1} | {w_all} | {w_pos} | {w_neg} |")
-        
+
     lines += [
         "",
         "---",
@@ -3210,14 +3208,14 @@ def format_comment_analysis_markdown(shortcode: str, comments: List[Dict[str, An
         "## 💬 Highlight Comments",
         ""
     ]
-    
+
     # Display top-liked positive/negative comments for qualitative context
     comments_by_sentiment = {
         "Positive": [c for c in analysis["processed_comments"] if c["sentiment"] == "Positive"],
         "Negative": [c for c in analysis["processed_comments"] if c["sentiment"] == "Negative"],
         "Neutral": [c for c in analysis["processed_comments"] if c["sentiment"] == "Neutral"]
     }
-    
+
     for sent, icon in [("Positive", "🟢"), ("Negative", "🔴")]:
         s_list = comments_by_sentiment[sent]
         if s_list:
@@ -3231,6 +3229,6 @@ def format_comment_analysis_markdown(shortcode: str, comments: List[Dict[str, An
                     clean_text = clean_text[:147] + "..."
                 lines.append(f"- **@{c['username']}**: \"{clean_text}\" *(❤️ {c['likes']} likes, 💬 {c['replies']} replies)*")
             lines.append("")
-            
+
     return "\n".join(lines)
 
